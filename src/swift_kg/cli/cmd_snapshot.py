@@ -82,7 +82,7 @@ def save_snapshot(
     """
     Capture current SwiftKG metrics and save as a temporal snapshot.
 
-    Reads graph statistics and JSDoc coverage from the SQLite graph, runs the
+    Reads graph statistics and doc-comment coverage from the SQLite graph, runs the
     analyzer for issue counts and hotspots, then saves a snapshot keyed on
     VERSION. Omit VERSION and the snapshot is keyed on a UTC timestamp, which
     is the right answer for a corpus with no release tag. The tree hash is
@@ -300,7 +300,7 @@ def show_snapshot(key: str, snapshots_dir: str | None) -> None:
     click.echo(f"  Total Nodes:       {metrics.get('total_nodes', 0)}")
     click.echo(f"  Total Edges:       {metrics.get('total_edges', 0)}")
     click.echo(f"  Meaningful Nodes:  {metrics.get('meaningful_nodes', 0)}")
-    click.echo(f"  JSDoc Coverage:    {coverage:.1%}")
+    click.echo(f"  Doc Coverage:      {coverage:.1%}")
     click.echo(f"  Critical Issues:   {metrics.get('critical_issues', 0)}")
     click.echo(f"  Complexity Median: {metrics.get('complexity_median', 0.0):.2f}")
     click.echo()

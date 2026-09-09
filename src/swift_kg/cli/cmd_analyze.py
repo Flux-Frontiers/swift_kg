@@ -49,7 +49,7 @@ def analyze(
     """Run a thorough analysis of a Swift repository.
 
     Analyzes fan-in/fan-out, module coupling, CodeRank, SIR centrality,
-    JSDoc coverage, class/interface hierarchy, and other health signals.
+    doc-comment coverage, type/conformance hierarchy, and other health signals.
     Outputs a Markdown report.
     """
     from swift_kg.analysis import SwiftKGAnalyzer  # pylint: disable=import-outside-toplevel

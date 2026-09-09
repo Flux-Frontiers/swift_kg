@@ -36,7 +36,7 @@ packages = [{ include = "swift_kg", from = "src" }]
 [project]
 name = "swift-kg"
 version = "0.1.0"
-description = "Knowledge graph for Swift codebases — AST extraction, hybrid semantic+structural search"
+description = "Knowledge graph for Swift codebases -- AST extraction, hybrid semantic+structural search"
 readme = "README.md"
 license = "Elastic-2.0"
 authors = [

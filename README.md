@@ -7,7 +7,7 @@
 [![CI](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 
-Knowledge graph for Swift codebases — deterministic AST extraction, hybrid semantic + structural search.
+Knowledge graph for Swift codebases -- deterministic AST extraction, hybrid semantic + structural search.
 
 ## Overview
 
