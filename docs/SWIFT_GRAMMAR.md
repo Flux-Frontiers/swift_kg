@@ -88,6 +88,48 @@ handles both, and walks backwards through the run for the first.
 A comment sits before the declaration itself, not before its `modifiers`
 child, so the anchor for the search is the declaration node.
 
+## Access levels are not uniformly `internal`
+
+Swift's default is `internal` almost everywhere, and the exceptions are common
+enough that ignoring them mis-reports a large share of a real codebase's
+public surface:
+
+- **`public extension`** confers public access on members that declare none.
+  A `public class` does *not* — its members still default to `internal`.
+- **A protocol requirement** has the protocol's own access level, and cannot
+  declare a different one.
+
+An explicit modifier on the member always wins. `_visibility()` takes the
+level the enclosing scope confers, which is why it is carried per scope
+rather than inherited by every type.
+
+## One declaration can bind several names
+
+`public let a: Int, b: Int` is a single `property_declaration` with two
+`pattern` fields. Reading only the first silently drops the rest, so
+`_member_names()` returns all of them.
+
+## An external protocol is not a superclass
+
+`class ViewModel: ObservableObject` has no superclass, but `ObservableObject`
+is declared in Combine and so is invisible to the symbol table. The positional
+fallback — first specifier on a class is the superclass — would invent one.
+
+`_KNOWN_EXTERNAL_PROTOCOLS` names the standard-library and Apple-framework
+protocols that turn up in inheritance clauses constantly: `ObservableObject`,
+`Codable`, `Error`, `Sendable`, `View`, `Identifiable`, the UIKit delegates,
+and so on. It is a floor, not a database — anything absent still falls through
+to the heuristic, which is correct for real superclasses like `NSObject`.
+
+## Several extensions on one type, in one file
+
+Idiomatic Swift writes one extension per conformance, all in the same file.
+Keying an extension node on the extended type alone collides, and the
+collision is silent: the store upserts by node ID, so the second overwrites
+the first. Extension IDs therefore carry the conformance list
+(`ext:…:Point+Codable`), falling back to a start line for a repeated bare
+`extension Point {}`.
+
 ## What is deliberately not modelled
 
 **Type inference.** `let x = makeThing()` does not tell the graph what `x` is.

@@ -53,7 +53,9 @@ resolves to nothing rather than to an arbitrary one of the two — an honest
 behaviour routinely live in an extension in a different file. Each extension
 gets its own node and an `EXTENDS` edge to the type, with members qualified
 under the type (`Point.scaled`), so `swiftkg` can answer "where is the rest of
-this type" without losing where the code actually is.
+this type" without losing where the code actually is. Since it is idiomatic to
+write one extension per conformance, an extension's own ID carries its
+conformance list (`ext:…:Point+Codable`) rather than colliding on the type name.
 
 Swift also states access level with a keyword, so `public` / `open` /
 `internal` / `private` is recorded as a fact rather than guessed from a naming

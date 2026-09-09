@@ -75,6 +75,9 @@ sym:Foundation                                  unresolved import or call
 
 Nested types qualify through: `cls:…:Outer.Inner`, `meth:…:Outer.Inner.run`.
 Extension members qualify under the extended type: `meth:…:Point.scaled`.
+An extension's own ID carries its conformances (`ext:…:Point+Codable`), since
+Swift allows several extensions on one type in one file; a bare
+`extension Point {}` repeated in a file falls back to `Point@<line>`.
 
 ## Relations
 

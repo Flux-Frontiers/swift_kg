@@ -204,14 +204,39 @@ class TestInheritanceResolution:
 class TestExtensions:
     def test_extension_gets_its_own_node(self, tmp_repo: Path) -> None:
         nodes, _ = _extract(tmp_repo)
-        assert len(_kinds(nodes, "extension")) == 1
+        assert _kinds(nodes, "extension")
 
     def test_extension_points_at_the_extended_type(self, tmp_repo: Path) -> None:
         _, edges = _extract(tmp_repo)
         extends = _rel(edges, "EXTENDS")
-        assert len(extends) == 1
-        assert extends[0].target_id.startswith("struct:")
-        assert extends[0].target_id.endswith(":Point")
+        assert extends
+        assert all(e.target_id.endswith(":Point") for e in extends)
+        assert all(e.target_id.startswith("struct:") for e in extends)
+
+    def test_two_extensions_on_one_type_get_distinct_ids(self, tmp_repo: Path) -> None:
+        """Swift allows any number of extensions on a type in one file.
+
+        Keying on the extended type alone collides, and the store upserts by
+        node ID, so the second would silently overwrite the first.
+        """
+        nodes, _ = _extract(tmp_repo)
+        extensions = [n for n in _kinds(nodes, "extension") if n.name == "Point"]
+        assert len(extensions) == 2
+        assert len({n.node_id for n in extensions}) == 2
+
+    def test_extension_id_names_its_conformance(self, tmp_repo: Path) -> None:
+        """The conformance list is the discriminator, not a line number.
+
+        It is stable under edits elsewhere in the file, and it is how the
+        extension is actually referred to.
+        """
+        nodes, _ = _extract(tmp_repo)
+        ids = {n.node_id for n in _kinds(nodes, "extension")}
+        assert any(i.endswith(":Point+CustomStringConvertible") for i in ids)
+
+    def test_every_extension_still_points_at_the_type(self, tmp_repo: Path) -> None:
+        _, edges = _extract(tmp_repo)
+        assert len(_rel(edges, "EXTENDS")) == 2
 
     def test_extension_members_are_qualified_under_the_type(self, tmp_repo: Path) -> None:
         nodes, _ = _extract(tmp_repo)
@@ -222,7 +247,12 @@ class TestExtensions:
 
     def test_extension_conformance_is_conformance_not_inheritance(self, tmp_repo: Path) -> None:
         _, edges = _extract(tmp_repo)
-        assert ("Point", "CustomStringConvertible") in _pairs(edges, "CONFORMS")
+        # The source is the extension node, whose qualname carries the
+        # conformance that disambiguates it from Point's other extension.
+        assert ("Point+CustomStringConvertible", "CustomStringConvertible") in _pairs(
+            edges, "CONFORMS"
+        )
+        assert not [e for e in _rel(edges, "INHERITS") if e.source_id.startswith("ext:")]
 
 
 # ---------------------------------------------------------------------------
@@ -346,3 +376,72 @@ class TestExtractorProtocol:
         nodes, _ = _extract(tmp_repo)
         ids = [n.node_id for n in nodes]
         assert len(ids) == len(set(ids))
+
+
+# ---------------------------------------------------------------------------
+# Access-level rules
+# ---------------------------------------------------------------------------
+
+
+class TestAccessLevelRules:
+    """Swift's default is `internal` in most places, but not everywhere."""
+
+    def test_public_extension_makes_members_public(self, tmp_repo: Path) -> None:
+        """`public extension` confers public access on members declaring none.
+
+        A `public class` does *not* work this way, which is why the level is
+        carried per scope rather than inherited by every type.
+        """
+        nodes, _ = _extract(tmp_repo)
+        inverted = next(n for n in nodes if n.qualname == "Point.inverted")
+        assert inverted.metadata["visibility"] == "public"
+
+    def test_public_class_members_still_default_to_internal(self, tmp_repo: Path) -> None:
+        nodes, _ = _extract(tmp_repo)
+        audit = next(n for n in nodes if n.qualname == "GeometryModel.audit")
+        assert audit.metadata["visibility"] == "public"  # explicitly marked
+        fetch = next(n for n in nodes if n.qualname == "Storage.fetch")
+        assert fetch.metadata["visibility"] == "public"  # explicitly marked
+        deep = next(n for n in nodes if n.qualname == "DiskStorage.Inner.deep")
+        assert deep.metadata["visibility"] == "internal"  # unmodified
+
+    def test_protocol_requirement_takes_the_protocol_level(self, tmp_repo: Path) -> None:
+        """A requirement cannot declare an access level different from its protocol."""
+        nodes, _ = _extract(tmp_repo)
+        measure = next(n for n in nodes if n.qualname == "Measurable.measure")
+        assert measure.metadata["visibility"] == "public"
+
+    def test_explicit_modifier_beats_the_inherited_one(self, tmp_repo: Path) -> None:
+        nodes, _ = _extract(tmp_repo)
+        items = next(n for n in nodes if n.qualname == "Storage.items")
+        assert items.metadata["visibility"] == "private"
+
+
+class TestMultipleBindings:
+    def test_every_name_in_one_declaration_is_captured(self, tmp_repo: Path) -> None:
+        """`let first: Double, second: Double` binds two names, not one."""
+        nodes, _ = _extract(tmp_repo)
+        qualnames = {n.qualname for n in nodes}
+        assert {"Pair.first", "Pair.second"} <= qualnames
+
+
+class TestExternalProtocolClassification:
+    """A well-known external protocol must not be mistaken for a superclass."""
+
+    def test_known_external_protocol_is_conformance(self, tmp_repo: Path) -> None:
+        _, edges = _extract(tmp_repo)
+        assert ("GeometryModel", "ObservableObject") in _pairs(edges, "CONFORMS")
+
+    def test_it_is_not_recorded_as_inheritance(self, tmp_repo: Path) -> None:
+        """The positional heuristic alone would invent a superclass here."""
+        _, edges = _extract(tmp_repo)
+        assert ("GeometryModel", "ObservableObject") not in _pairs(edges, "INHERITS")
+
+    def test_an_unknown_first_specifier_is_still_inheritance(self, tmp_repo: Path) -> None:
+        """The heuristic still applies to names the list does not cover."""
+        _, edges = _extract(tmp_repo)
+        assert ("Storage", "NSObject") in _pairs(edges, "INHERITS")
+
+    def test_a_later_known_protocol_is_still_conformance(self, tmp_repo: Path) -> None:
+        _, edges = _extract(tmp_repo)
+        assert ("GeometryModel", "Auditable") in _pairs(edges, "CONFORMS")

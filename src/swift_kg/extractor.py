@@ -172,6 +172,76 @@ _TYPE_KINDS = frozenset({"class", "struct", "enum", "protocol", "actor"})
 #: Only these can sit at the head of an inheritance clause as a superclass.
 _SUPERCLASS_KINDS = frozenset({"class", "actor"})
 
+#: Protocols from the standard library and Apple's frameworks, which appear in
+#: inheritance clauses constantly and are never declared in the repository
+#: being indexed — so the symbol table cannot classify them.
+#:
+#: Without this, the position heuristic files `class ViewModel:
+#: ObservableObject` as INHERITS, inventing a superclass for a class that has
+#: none. That is not a rare miss: `ObservableObject`, `Codable`, `Error` and
+#: `Sendable` are among the most common first specifiers on a Swift class.
+#:
+#: Deliberately limited to names that are unambiguously protocols and stable
+#: across releases. It is a floor, not a database: anything absent still falls
+#: through to the positional heuristic, which is correct for real superclasses.
+_KNOWN_EXTERNAL_PROTOCOLS: frozenset[str] = frozenset(
+    {
+        # Swift standard library
+        "AnyObject",
+        "Actor",
+        "CaseIterable",
+        "Codable",
+        "Comparable",
+        "CustomDebugStringConvertible",
+        "CustomStringConvertible",
+        "Decodable",
+        "Encodable",
+        "Equatable",
+        "Error",
+        "ExpressibleByArrayLiteral",
+        "ExpressibleByStringLiteral",
+        "Hashable",
+        "Identifiable",
+        "Iterator",
+        "LocalizedError",
+        "RawRepresentable",
+        "Sendable",
+        "Sequence",
+        "Collection",
+        # Combine / SwiftUI / Observation
+        "ObservableObject",
+        "Observable",
+        "Publisher",
+        "Subscriber",
+        "View",
+        "App",
+        "Scene",
+        "ViewModifier",
+        "Shape",
+        "PreviewProvider",
+        "EnvironmentKey",
+        "PreferenceKey",
+        "Transferable",
+        # Foundation / ObjC runtime
+        "NSObjectProtocol",
+        "NSCopying",
+        "NSCoding",
+        "NSSecureCoding",
+        "URLSessionDelegate",
+        "URLSessionTaskDelegate",
+        # UIKit / AppKit delegates and data sources
+        "UIApplicationDelegate",
+        "UISceneDelegate",
+        "UITableViewDelegate",
+        "UITableViewDataSource",
+        "UICollectionViewDelegate",
+        "UICollectionViewDataSource",
+        "UITextFieldDelegate",
+        "UIScrollViewDelegate",
+        "NSApplicationDelegate",
+    }
+)
+
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -305,6 +375,26 @@ def _declared_name(node: Any, source: bytes) -> str:
     return _base_type_name(_node_text(name_node, source))
 
 
+def _member_names(node: Any, source: bytes) -> list[str]:
+    """Return every name a property declaration binds.
+
+    `let a: Int, b: Int` is one `property_declaration` with two `pattern`
+    fields, so reading only the first silently drops the rest.
+    """
+    names: list[str] = []
+    for child in node.children:
+        if child.type != "pattern":
+            continue
+        bound = child.child_by_field_name("bound_identifier")
+        text = _node_text(bound if bound is not None else child, source).strip()
+        if _IDENTIFIER_RE.match(text):
+            names.append(text)
+    if names:
+        return names
+    single = _member_name(node, source)
+    return [single] if single and _IDENTIFIER_RE.match(single) else []
+
+
 def _member_name(node: Any, source: bytes) -> str:
     """Return the declared name of a member declaration.
 
@@ -338,23 +428,49 @@ def _member_name(node: Any, source: bytes) -> str:
 _VISIBILITY_LEVELS = ("private", "fileprivate", "internal", "package", "public", "open")
 
 
-def _visibility(node: Any, source: bytes) -> str:
-    """Return a declaration's Swift access level.
-
-    Swift states visibility with a keyword, so this is a fact about the code
-    rather than the naming convention (`_`-prefix) that the Python and
-    JavaScript modules have to infer it from. Defaults to ``"internal"``,
-    which is what Swift itself defaults to.
-    """
+def _declared_visibility(node: Any, source: bytes) -> str | None:
+    """Return the access level written on a declaration, or ``None`` if absent."""
     modifiers = next((c for c in node.children if c.type == "modifiers"), None)
     if modifiers is None:
-        return "internal"
+        return None
     for child in modifiers.children:
         if child.type == "visibility_modifier":
             level = _node_text(child, source).strip()
             if level in _VISIBILITY_LEVELS:
                 return level
-    return "internal"
+    return None
+
+
+def _visibility(node: Any, source: bytes, inherited: str | None = None) -> str:
+    """Return a declaration's effective Swift access level.
+
+    Swift states visibility with a keyword, so this is a fact about the code
+    rather than the naming convention (a `_` prefix) that the Python and
+    JavaScript modules have to infer it from.
+
+    ``inherited`` carries the two cases where Swift's default is *not*
+    ``internal``, and both are common enough that ignoring them mis-reports a
+    large share of a real codebase's public surface:
+
+    * **`public extension`** gives its members public access by default, so an
+      unmodified `func` inside one is public. (A `public class` does *not*
+      work this way — its members still default to internal, which is why this
+      is passed in per scope rather than inherited by every type.)
+    * **A protocol requirement** has the protocol's own access level; there is
+      no way to write a different one.
+
+    An explicit modifier on the member always wins.
+
+    :param node: The declaration node.
+    :param source: File bytes.
+    :param inherited: Access level the enclosing scope confers on members that
+        declare none, or ``None`` for Swift's plain ``internal`` default.
+    :return: One of :data:`_VISIBILITY_LEVELS`.
+    """
+    declared = _declared_visibility(node, source)
+    if declared is not None:
+        return declared
+    return inherited or "internal"
 
 
 def _inheritance_targets(node: Any, source: bytes) -> list[str]:
@@ -626,6 +742,8 @@ class _FileWalker:
         self.spm_targets = spm_targets
         self._mod_id = _make_node_id("module", rel_path)
         self._emitted: list[NodeSpec | EdgeSpec] = []
+        #: Extension IDs already issued for this file, for disambiguation.
+        self._extension_ids: set[str] = set()
 
     # ------------------------------------------------------------------
     # Entry point
@@ -636,7 +754,12 @@ class _FileWalker:
         if not self.collect_only:
             self._emit_module()
         self._walk_scope(
-            self.root, owner_id=self._mod_id, scope=(), enclosing_type="", enclosing_super=""
+            self.root,
+            owner_id=self._mod_id,
+            scope=(),
+            enclosing_type="",
+            enclosing_super="",
+            member_visibility=None,
         )
         return self._emitted
 
@@ -691,6 +814,7 @@ class _FileWalker:
         scope: tuple[str, ...],
         enclosing_type: str,
         enclosing_super: str,
+        member_visibility: str | None,
     ) -> None:
         """Recurse through a scope, dispatching on declaration node type.
 
@@ -704,7 +828,9 @@ class _FileWalker:
                 self._handle_import(child)
 
             elif t in _TYPE_DECL_NODES:
-                self._handle_type_declaration(child, owner_id=owner_id, scope=scope)
+                self._handle_type_declaration(
+                    child, owner_id=owner_id, scope=scope, member_visibility=member_visibility
+                )
 
             elif t in _FUNCTION_MEMBERS:
                 self._handle_callable(
@@ -713,6 +839,7 @@ class _FileWalker:
                     scope=scope,
                     enclosing_type=enclosing_type,
                     enclosing_super=enclosing_super,
+                    member_visibility=member_visibility,
                 )
 
             elif t in _PROPERTY_MEMBERS:
@@ -722,10 +849,13 @@ class _FileWalker:
                     scope=scope,
                     enclosing_type=enclosing_type,
                     enclosing_super=enclosing_super,
+                    member_visibility=member_visibility,
                 )
 
             elif t in _TYPEALIAS_MEMBERS:
-                self._handle_typealias(child, owner_id=owner_id, scope=scope)
+                self._handle_typealias(
+                    child, owner_id=owner_id, scope=scope, member_visibility=member_visibility
+                )
 
             elif t == "enum_entry":
                 self._handle_enum_entry(child, owner_id=owner_id, scope=scope)
@@ -740,6 +870,7 @@ class _FileWalker:
                     scope=scope,
                     enclosing_type=enclosing_type,
                     enclosing_super=enclosing_super,
+                    member_visibility=member_visibility,
                 )
 
     # ------------------------------------------------------------------
@@ -777,6 +908,7 @@ class _FileWalker:
         *,
         owner_id: str,
         scope: tuple[str, ...],
+        member_visibility: str | None,
     ) -> None:
         kind = _declaration_kind(node, self.source)
         name = _declared_name(node, self.source)
@@ -784,7 +916,9 @@ class _FileWalker:
             return
 
         if kind == "extension":
-            self._handle_extension(node, name=name, owner_id=owner_id)
+            self._handle_extension(
+                node, name=name, owner_id=owner_id, member_visibility=member_visibility
+            )
             return
 
         qualname = ".".join((*scope, name))
@@ -805,7 +939,7 @@ class _FileWalker:
                     docstring=_extract_doc(node, self.source),
                     metadata={
                         "declaration_kind": kind,
-                        "visibility": _visibility(node, self.source),
+                        "visibility": _visibility(node, self.source, member_visibility),
                     },
                 )
             )
@@ -814,15 +948,48 @@ class _FileWalker:
             )
             self._emit_inheritance(node, subject_id=node_id, subject_kind=kind)
 
+        # A protocol requirement has the protocol's own access level and cannot
+        # declare a different one. Every other type's members default to
+        # `internal` regardless of the type's own level, so nothing is inherited.
+        own_visibility = _visibility(node, self.source, member_visibility)
         self._walk_body(
             node,
             owner_id=node_id,
             scope=(*scope, name),
             enclosing_type=name,
             enclosing_super=self._superclass_of(node, kind),
+            member_visibility=own_visibility if kind == "protocol" else None,
         )
 
-    def _handle_extension(self, node: Any, *, name: str, owner_id: str) -> None:
+    def _extension_node_id(self, node: Any, name: str) -> str:
+        """Return a unique node ID for one extension.
+
+        Swift allows any number of extensions on the same type in the same
+        file, and it is idiomatic to write one per conformance. Keying on the
+        extended type alone collides, and the collision is silent: the store
+        upserts by node ID, so the second extension overwrites the first and
+        the graph simply loses one.
+
+        The conformance list is the discriminator, because it is both stable
+        under edits elsewhere in the file and how the extension is actually
+        referred to -- "the Codable extension". A bare `extension Point {}`
+        has nothing to name it by, so a repeat falls back to its start line.
+
+        :param node: The extension declaration node.
+        :param name: Bare name of the extended type.
+        :return: A node ID unique within this file.
+        """
+        bases = _inheritance_targets(node, self.source)
+        qualname = f"{name}+{'+'.join(bases)}" if bases else name
+        node_id = _make_node_id("extension", self.rel_path, qualname)
+        if node_id in self._extension_ids:
+            node_id = _make_node_id("extension", self.rel_path, f"{qualname}@{_lineno(node)}")
+        self._extension_ids.add(node_id)
+        return node_id
+
+    def _handle_extension(
+        self, node: Any, *, name: str, owner_id: str, member_visibility: str | None
+    ) -> None:
         """Emit an extension as its own node, with members qualified under the extended type.
 
         Extensions are a unit of authorship in Swift, not a syntactic wrapper:
@@ -832,7 +999,7 @@ class _FileWalker:
         EXTENDS edge, while its members are still qualified as ``Type.member``
         so they read as members of the type.
         """
-        node_id = _make_node_id("extension", self.rel_path, name)
+        node_id = self._extension_node_id(node, name)
 
         if not self.collect_only:
             self._emitted.append(
@@ -848,7 +1015,7 @@ class _FileWalker:
                     metadata={
                         "declaration_kind": "extension",
                         "extends": name,
-                        "visibility": _visibility(node, self.source),
+                        "visibility": _visibility(node, self.source, member_visibility),
                     },
                 )
             )
@@ -867,6 +1034,9 @@ class _FileWalker:
                     EdgeSpec(source_id=node_id, target_id=base_id, relation="CONFORMS")
                 )
 
+        # `public extension` gives its members public access by default -- a
+        # very common idiom, and the one place Swift's default is not
+        # `internal`. `public class` does *not* work this way.
         self._walk_body(
             node,
             owner_id=node_id,
@@ -874,6 +1044,7 @@ class _FileWalker:
             enclosing_type=name,
             # An extension cannot override, so `super` has no meaning in its body.
             enclosing_super="",
+            member_visibility=_declared_visibility(node, self.source),
         )
 
     def _walk_body(
@@ -884,6 +1055,7 @@ class _FileWalker:
         scope: tuple[str, ...],
         enclosing_type: str,
         enclosing_super: str,
+        member_visibility: str | None,
     ) -> None:
         body = node.child_by_field_name("body")
         if body is None:
@@ -896,6 +1068,7 @@ class _FileWalker:
             scope=scope,
             enclosing_type=enclosing_type,
             enclosing_super=enclosing_super,
+            member_visibility=member_visibility,
         )
 
     def _emit_inheritance(self, node: Any, *, subject_id: str, subject_kind: str) -> None:
@@ -910,7 +1083,7 @@ class _FileWalker:
             target_kind = self.symbols.type_kind(base)
             target_id = self.symbols.type_id(base) or f"sym:{base}"
 
-            if target_kind == "protocol":
+            if target_kind == "protocol" or base in _KNOWN_EXTERNAL_PROTOCOLS:
                 relation = "CONFORMS"
             elif target_kind in _SUPERCLASS_KINDS:
                 relation = "INHERITS"
@@ -938,6 +1111,7 @@ class _FileWalker:
         scope: tuple[str, ...],
         enclosing_type: str,
         enclosing_super: str,
+        member_visibility: str | None,
     ) -> None:
         name = _member_name(node, self.source)
         if not name:
@@ -966,7 +1140,7 @@ class _FileWalker:
                 docstring=_extract_doc(node, self.source),
                 metadata={
                     "declaration": node.type,
-                    "visibility": _visibility(node, self.source),
+                    "visibility": _visibility(node, self.source, member_visibility),
                 },
             )
         )
@@ -986,11 +1160,33 @@ class _FileWalker:
         scope: tuple[str, ...],
         enclosing_type: str,
         enclosing_super: str,
+        member_visibility: str | None,
     ) -> None:
-        name = _member_name(node, self.source)
-        if not name or not _IDENTIFIER_RE.match(name):
+        names = _member_names(node, self.source)
+        if not names:
             return
+        for name in names:
+            self._emit_property(
+                node,
+                name=name,
+                owner_id=owner_id,
+                scope=scope,
+                enclosing_type=enclosing_type,
+                enclosing_super=enclosing_super,
+                member_visibility=member_visibility,
+            )
 
+    def _emit_property(
+        self,
+        node: Any,
+        *,
+        name: str,
+        owner_id: str,
+        scope: tuple[str, ...],
+        enclosing_type: str,
+        enclosing_super: str,
+        member_visibility: str | None,
+    ) -> None:
         qualname = ".".join((*scope, name))
         node_id = _make_node_id("property", self.rel_path, qualname)
 
@@ -1011,7 +1207,7 @@ class _FileWalker:
                 docstring=_extract_doc(node, self.source),
                 metadata={
                     "declaration": node.type,
-                    "visibility": _visibility(node, self.source),
+                    "visibility": _visibility(node, self.source, member_visibility),
                 },
             )
         )
@@ -1024,7 +1220,14 @@ class _FileWalker:
             enclosing_super=enclosing_super,
         )
 
-    def _handle_typealias(self, node: Any, *, owner_id: str, scope: tuple[str, ...]) -> None:
+    def _handle_typealias(
+        self,
+        node: Any,
+        *,
+        owner_id: str,
+        scope: tuple[str, ...],
+        member_visibility: str | None,
+    ) -> None:
         name = _member_name(node, self.source)
         if not name or not _IDENTIFIER_RE.match(name):
             return
@@ -1047,7 +1250,7 @@ class _FileWalker:
                 docstring=_extract_doc(node, self.source),
                 metadata={
                     "declaration": node.type,
-                    "visibility": _visibility(node, self.source),
+                    "visibility": _visibility(node, self.source, member_visibility),
                 },
             )
         )
@@ -1094,6 +1297,8 @@ class _FileWalker:
         if kind not in _SUPERCLASS_KINDS:
             return ""
         for position, base in enumerate(_inheritance_targets(node, self.source)):
+            if base in _KNOWN_EXTERNAL_PROTOCOLS:
+                continue
             target_kind = self.symbols.type_kind(base)
             if target_kind in _SUPERCLASS_KINDS:
                 return base

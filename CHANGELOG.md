@@ -47,9 +47,21 @@ First release. SwiftKG is the fleet's fourth language module, built on
   into the type would lose where the code actually lives.
 - **Access levels recorded on every node.** Swift states visibility with a
   keyword, so `public` / `open` / `internal` / `private` is read rather than
-  inferred from a naming convention. This feeds the centrality penalty, the
-  public-API analysis phase, the `public_api` MCP tool, and `explain`'s
-  zero-caller reasoning.
+  inferred from a naming convention. The two places Swift's default is not
+  `internal` are honoured: `public extension` confers public access on members
+  declaring none, and a protocol requirement takes its protocol's level. This
+  feeds the centrality penalty, the public-API analysis phase, the
+  `public_api` MCP tool, and `explain`'s zero-caller reasoning.
+- **Well-known external protocols classified correctly.** `class ViewModel:
+  ObservableObject` has no superclass, but `ObservableObject` is declared in
+  Combine and invisible to the symbol table, so the positional fallback would
+  invent one. A curated set of standard-library and Apple-framework protocol
+  names resolves these to `CONFORMS`; anything absent still falls through to
+  the heuristic, which is correct for real superclasses like `NSObject`.
+- **Extension IDs carry their conformance list** (`ext:…:Point+Codable`).
+  Idiomatic Swift writes one extension per conformance in the same file, and
+  keying on the extended type alone collides — silently, since the store
+  upserts by node ID and the second would overwrite the first.
 - **`swiftkg` CLI**: `init`, `build`, `update`, `build-sqlite`, `build-index`,
   `query`, `pack`, `analyze`, `explain`, `centrality`, `bridges`,
   `framework-nodes`, `snapshot`, `install-hooks`, `download-model`, `mcp`.
