@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Example MCP configuration for a Swift repository you want to index.",
+    "Copy to that repository as .mcp.json and set --repo to its path.",
+    "",
+    "This repository is Python, so it indexes itself with PyCodeKG, not",
+    "SwiftKG -- SwiftKG reads Swift. Machine-specific paths keep a real",
+    ".mcp.json out of version control."
+  ],
+  "mcpServers": {
+    "swiftkg": {
+      "command": "swiftkg-mcp",
+      "args": [
+        "--repo",
+        "/absolute/path/to/swift-repo",
+        "--db",
+        "/absolute/path/to/swift-repo/.swiftkg/graph.sqlite",
+        "--vectors",
+        "/absolute/path/to/swift-repo/.swiftkg/vectors.sqlite"
+      ]
+    }
+  }
+}

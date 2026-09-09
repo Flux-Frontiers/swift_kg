@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Type checkers / linters
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+
+# Editors
+.idea/
+*.swp
+.DS_Store
+
+# KG artefacts. The snapshot manifests under .pycodekg/snapshots/ are the
+# exception: they are the repo's own temporal record and are committed.
+.swiftkg/
+.pycodekg/*
+!.pycodekg/snapshots/
+.dockg/
+
+# Cached embedding models
+.kgcache/

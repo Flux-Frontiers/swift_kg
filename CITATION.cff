@@ -1,0 +1,36 @@
+cff-version: "1.2.0"
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "SwiftKG: Semantic Knowledge Graph for Swift Codebases"
+abstract: >
+  SwiftKG builds a hybrid semantic + structural knowledge graph from Swift
+  repositories. It indexes every file, class, struct, enum, protocol, actor,
+  extension, function, method, property and type alias as a node, with typed
+  edges (CALLS, IMPORTS, CONTAINS, INHERITS, CONFORMS, EXTENDS) connecting
+  them. A repo-wide two-pass resolver separates superclass inheritance from
+  protocol conformance, which Swift writes with identical syntax, and resolves
+  references across files, which Swift's module-scoped visibility makes
+  correct. Extraction is deterministic tree-sitter parsing, needing no Swift
+  toolchain and no buildable project, enabling natural-language querying,
+  call-chain analysis, architectural introspection, and MCP-based AI
+  integration.
+authors:
+  - family-names: Suchanek
+    given-names: "Eric G., PhD"
+    orcid: "https://orcid.org/0009-0009-0891-1507"
+    email: suchanek@flux-frontiers.com
+    affiliation: "Flux-Frontiers"
+version: "0.1.0"
+date-released: "2026-09-09"
+license-url: "https://www.elastic.co/licensing/elastic-license"
+repository-code: "https://github.com/Flux-Frontiers/swift_kg"
+url: "https://github.com/Flux-Frontiers/swift_kg"
+keywords:
+  - knowledge-graph
+  - code-analysis
+  - swift
+  - ios
+  - tree-sitter
+  - semantic-search
+  - sqlite-vec
+  - mcp
