@@ -121,6 +121,34 @@ protocols that turn up in inheritance clauses constantly: `ObservableObject`,
 and so on. It is a floor, not a database — anything absent still falls through
 to the heuristic, which is correct for real superclasses like `NSObject`.
 
+## An enum's raw type is not a conformance
+
+`enum Sections: Int` and `class Client: Codable` are the same syntax, but `Int`
+is a raw value and `Codable` is a conformance. Reading the clause uniformly
+files `Sections CONFORMS Int`, which names `Int` as a protocol.
+
+Only an enum can have a raw value, and it is written first, so
+`_RAW_VALUE_TYPES` — the literal-backed standard-library types — is consulted
+for the first specifier on an enum and emits no edge. Anything else falls
+through to conformance, which is right for `enum StorageError: Error`, and a
+specifier *after* the raw type is untouched, so `enum CodingKeys: String,
+CodingKey` keeps its `CodingKey` conformance.
+
+## A nested type is invisible under its bare name
+
+`PathMonitor.Result` does not answer to `Result` from outside `PathMonitor`.
+Keying the symbol table on bare names makes a repo-unique nested name absorb
+every reference to that name anywhere in the repository — and the references
+it absorbs are usually to a *standard-library* type of the same name, which
+the table cannot contain and so cannot rule out. It is the worst shape of
+error the table can make: unambiguous, confident and wrong.
+
+Types are keyed by qualified name, and `_scoped_names()` resolves outward
+through the enclosing scopes before trying file scope, the order Swift uses.
+So `Result` inside `PathMonitor` still resolves to the nested enum, while
+`extension Result` at file scope becomes a `sym:` stub — correctly, because it
+extends a type the repository does not declare.
+
 ## Several extensions on one type, in one file
 
 Idiomatic Swift writes one extension per conformance, all in the same file.

@@ -1,0 +1,87 @@
+# mkdocs-material site config -- see .github/workflows/docs.yml for the build.
+#
+# Deliberately no theme.logo / theme.favicon: this repo ships no brand assets,
+# and naming files that do not exist gives the built site two silent 404s.
+# Add both to docs/assets/ and the two keys together, not one without the other.
+site_name: SwiftKG
+site_description: Knowledge graph for Swift codebases -- deterministic tree-sitter AST extraction, hybrid semantic + structural search, served over MCP.
+site_url: https://flux-frontiers.github.io/swift_kg/
+repo_url: https://github.com/Flux-Frontiers/swift_kg
+repo_name: Flux-Frontiers/swift_kg
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: sphinx
+            show_source: true
+            show_root_heading: true
+            heading_level: 2
+            merge_init_into_class: true
+
+# GitHub reads this one out of docs/; it is not a page of the site.
+not_in_nav: |
+  pull_request_template.md
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: INSTALLATION.md
+      - Cheatsheet: CHEATSHEET.md
+      - MCP server: MCP.md
+  - Analysis:
+      - Repository analysis: Analyze.md
+      - Ranking (SIR and CodeRank): CODERANK.md
+      - Snapshots: SNAPSHOTS.md
+  - Swift:
+      - What the extractor sees: SWIFT_GRAMMAR.md
+  - API reference:
+      - Core:
+          - Knowledge graph: api/kg.md
+          - Swift extractor: api/extractor.md
+          - Configuration: api/config.md
+          - Boundary validation: api/validation.md
+      - Analysis:
+          - Thorough analysis: api/swiftkg_thorough_analysis.md
+          - Centrality: api/centrality.md
+          - Module connectivity: api/bridge.md
+          - CodeRank: api/coderank.md
+          - Framework detection: api/framework_detector.md
+          - Node explanations: api/explain.md
+          - Snapshots: api/snapshots.md
+      - Interfaces:
+          - MCP server: api/mcp_server.md

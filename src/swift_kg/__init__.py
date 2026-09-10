@@ -28,8 +28,8 @@ __all__ = [
 ]
 
 try:
-    from swift_kg.analysis import SwiftKGAnalyzer
     from swift_kg.kg import BuildStats, QueryResult, SnippetPack, SwiftKG
+    from swift_kg.swiftkg_thorough_analysis import SwiftKGAnalyzer
 
     __all__ += [
         "SwiftKG",

@@ -1,0 +1,143 @@
+{
+  "key": "2026-09-09T23:03:10.708883+00:00",
+  "branch": "main",
+  "timestamp": "2026-09-09T23:03:10.709499+00:00",
+  "version": "0.27.0",
+  "subject": "",
+  "tool": "pycode-kg",
+  "tool_version": "0.27.0",
+  "tree_hash": "1b40d94dc5dae967e11cf91eb2a7d571670e07c6",
+  "metrics": {
+    "db_path": ".pycodekg/graph.sqlite",
+    "total_nodes": 3741,
+    "meaningful_nodes": 243,
+    "total_edges": 3324,
+    "node_counts": {
+      "class": 15,
+      "function": 116,
+      "method": 83,
+      "module": 29,
+      "symbol": 3498
+    },
+    "edge_counts": {
+      "ATTR_ACCESS": 1068,
+      "CALLS": 1360,
+      "CONTAINS": 214,
+      "IMPORTS": 151,
+      "INHERITS": 3,
+      "RESOLVES_TO": 528
+    },
+    "module_count": 29,
+    "class_count": 15,
+    "function_count": 116,
+    "method_count": 83,
+    "docstring_coverage": 0.79,
+    "snapshot_count": 0,
+    "module_node_counts": {
+      "src/swift_kg/__init__.py": 4,
+      "src/swift_kg/__main__.py": 1,
+      "src/swift_kg/analysis.py": 746,
+      "src/swift_kg/bridge.py": 36,
+      "src/swift_kg/centrality.py": 177,
+      "src/swift_kg/cli/__init__.py": 1,
+      "src/swift_kg/cli/cmd_analyze.py": 18,
+      "src/swift_kg/cli/cmd_bridges.py": 12,
+      "src/swift_kg/cli/cmd_build.py": 48,
+      "src/swift_kg/cli/cmd_centrality.py": 71,
+      "src/swift_kg/cli/cmd_explain.py": 15,
+      "src/swift_kg/cli/cmd_framework_nodes.py": 16,
+      "src/swift_kg/cli/cmd_hooks.py": 22,
+      "src/swift_kg/cli/cmd_init.py": 65,
+      "src/swift_kg/cli/cmd_mcp.py": 6,
+      "src/swift_kg/cli/cmd_model.py": 14,
+      "src/swift_kg/cli/cmd_query.py": 36,
+      "src/swift_kg/cli/cmd_snapshot.py": 166,
+      "src/swift_kg/cli/cmd_viz.py": 10,
+      "src/swift_kg/cli/main.py": 22,
+      "src/swift_kg/coderank.py": 255,
+      "src/swift_kg/config.py": 22,
+      "src/swift_kg/explain.py": 113,
+      "src/swift_kg/extractor.py": 621,
+      "src/swift_kg/framework_detector.py": 36,
+      "src/swift_kg/kg.py": 94,
+      "src/swift_kg/mcp_server.py": 522,
+      "src/swift_kg/snapshots.py": 13,
+      "src/swift_kg/validation.py": 30
+    },
+    "coverage_documented": 192,
+    "coverage_total": 243,
+    "critical_issues": 5,
+    "complexity_median": 5
+  },
+  "hotspots": [
+    {
+      "name": "fn:src/swift_kg/mcp_server.py:_get_kg",
+      "callers": 19,
+      "callees": 0,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/extractor.py:_node_text",
+      "callers": 10,
+      "callees": 0,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/extractor.py:_make_node_id",
+      "callers": 7,
+      "callees": 0,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/extractor.py:_lineno",
+      "callers": 7,
+      "callees": 0,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/extractor.py:_end_lineno",
+      "callers": 6,
+      "callees": 0,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/extractor.py:_extract_doc",
+      "callers": 6,
+      "callees": 3,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/coderank.py:compute_coderank",
+      "callers": 6,
+      "callees": 0,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/cli/cmd_snapshot.py:_default_snapshots_dir",
+      "callers": 5,
+      "callees": 0,
+      "risk_level": "low"
+    },
+    {
+      "name": "fn:src/swift_kg/extractor.py:_visibility",
+      "callers": 5,
+      "callees": 1,
+      "risk_level": "low"
+    },
+    {
+      "name": "m:src/swift_kg/kg.py:SwiftKG.callers",
+      "callers": 4,
+      "callees": 4,
+      "risk_level": "low"
+    }
+  ],
+  "issues": [
+    "[WARN] Moderate docstring coverage (79.0%) \u2014 semantic retrieval quality is degraded for undocumented nodes; BM25 is as effective as embeddings without docstrings",
+    "[WARN] 5 dead-code candidates found (`extractor.py:resolve_call`, `extractor.py:type_kind`, `extractor.py:add_method`, `extractor.py:add_function`, `extractor.py:add_type`) -- no callers in code or tests; verify against downstream consumers, then remove or archive",
+    "[INFO] 1 definitions are unused in production code but exercised by tests -- likely public API for downstream packages; not counted against the quality grade",
+    "[WARN] `extractor.py` has 57 functions/methods/classes -- consider splitting into focused submodules",
+    "[WARN] `analysis.py` has 31 functions/methods/classes -- consider splitting into focused submodules"
+  ],
+  "vs_previous": null,
+  "vs_baseline": null
+}

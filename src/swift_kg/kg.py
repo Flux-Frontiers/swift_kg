@@ -82,6 +82,10 @@ class SwiftKG(KGModule):
     :param vectors_path: sqlite-vec store path (defaults to ``<repo_root>/.swiftkg/vectors.sqlite``).
     :param model: Sentence-transformer model name.
     :param table: sqlite-vec table name.
+    :param include: Top-level directory names to index, unioned with
+        ``[tool.swiftkg].include``.  Empty means index everything.
+    :param exclude: Directory names to skip at every depth, unioned with
+        ``[tool.swiftkg].exclude``.
     """
 
     _default_dir = ".swiftkg"
@@ -94,6 +98,8 @@ class SwiftKG(KGModule):
         *,
         model: str = DEFAULT_MODEL,
         table: str = "swiftkg_nodes",
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
     ) -> None:
         super().__init__(
             repo_root,
@@ -104,14 +110,18 @@ class SwiftKG(KGModule):
         )
         if vectors_path is not None:
             self.vectors_path = Path(vectors_path)
+        self.include: set[str] = set(include or ())
+        self.exclude: set[str] = set(exclude or ())
 
     # ------------------------------------------------------------------
     # KGModule abstract interface
     # ------------------------------------------------------------------
 
     def make_extractor(self) -> KGExtractor:
-        include = load_include_dirs(self.repo_root)
-        exclude = load_exclude_dirs(self.repo_root)
+        # A Swift repo usually has no pyproject.toml, so the CLI flags are the
+        # only reachable way to scope a build on most repositories.
+        include = load_include_dirs(self.repo_root) | self.include
+        exclude = load_exclude_dirs(self.repo_root) | self.exclude
         return SwiftCodeExtractor(self.repo_root, include=include, exclude=exclude)
 
     def kind(self) -> str:
@@ -120,12 +130,12 @@ class SwiftKG(KGModule):
     def analyze(self) -> str:
         """Run thorough structural analysis and return a Markdown report.
 
-        Uses :class:`~swift_kg.analysis.SwiftKGAnalyzer` for the full analysis
+        Uses :class:`~swift_kg.swiftkg_thorough_analysis.SwiftKGAnalyzer` for the full analysis
         (fan-in, fan-out, module coupling, doc coverage, conformance graph, …).
         Falls back to a lightweight summary when the KG has not been built yet.
         """
         try:
-            from swift_kg.analysis import SwiftKGAnalyzer  # noqa: PLC0415
+            from swift_kg.swiftkg_thorough_analysis import SwiftKGAnalyzer  # noqa: PLC0415
 
             analyzer = SwiftKGAnalyzer(self)
             analyzer.run_analysis()

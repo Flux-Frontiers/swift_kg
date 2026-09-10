@@ -172,6 +172,37 @@ _TYPE_KINDS = frozenset({"class", "struct", "enum", "protocol", "actor"})
 #: Only these can sit at the head of an inheritance clause as a superclass.
 _SUPERCLASS_KINDS = frozenset({"class", "actor"})
 
+#: Types that can back an enum's raw value.  An enum writes its raw type in
+#: exactly the position a superclass or first conformance occupies -- `enum
+#: Sections: Int` and `class Client: Codable` are the same syntax -- so without
+#: this the raw type is filed as a CONFORMS edge to `Int`, which is not a
+#: protocol and not a conformance.
+#:
+#: Swift accepts any `ExpressibleBy*Literal` type as a raw value, which cannot
+#: be decided from syntax alone.  These are the literal-backed standard-library
+#: types, which is what raw values are in practice; anything else still falls
+#: through to conformance, the right answer for `enum E: Error`.
+_RAW_VALUE_TYPES: frozenset[str] = frozenset(
+    {
+        "Character",
+        "Double",
+        "Float",
+        "Float32",
+        "Float64",
+        "Int",
+        "Int8",
+        "Int16",
+        "Int32",
+        "Int64",
+        "String",
+        "UInt",
+        "UInt8",
+        "UInt16",
+        "UInt32",
+        "UInt64",
+    }
+)
+
 #: Protocols from the standard library and Apple's frameworks, which appear in
 #: inheritance clauses constantly and are never declared in the repository
 #: being indexed — so the symbol table cannot classify them.
@@ -615,7 +646,10 @@ class SymbolTable:
     """
 
     def __init__(self) -> None:
-        #: bare type name → list of (kind, node_id)
+        #: qualified type name → list of (kind, node_id).  A type declared at
+        #: file scope is keyed by its bare name; a nested one by
+        #: "Outer.Inner", because that is the only name it answers to from
+        #: outside ``Outer``.
         self.types: dict[str, list[tuple[str, str]]] = {}
         #: free function name → list of node_id
         self.functions: dict[str, list[str]] = {}
@@ -626,8 +660,14 @@ class SymbolTable:
 
     # -- population -----------------------------------------------------
 
-    def add_type(self, name: str, kind: str, node_id: str) -> None:
-        self.types.setdefault(name, []).append((kind, node_id))
+    def add_type(self, qualname: str, kind: str, node_id: str) -> None:
+        """Register a type under its *qualified* name.
+
+        :param qualname: Dotted path from file scope, e.g. ``PathMonitor.Result``.
+            A nested type is deliberately not registered under its bare name --
+            see :meth:`_scoped_names`.
+        """
+        self.types.setdefault(qualname, []).append((kind, node_id))
 
     def add_function(self, name: str, node_id: str) -> None:
         self.functions.setdefault(name, []).append(node_id)
@@ -639,20 +679,55 @@ class SymbolTable:
 
     # -- lookup ---------------------------------------------------------
 
-    def type_kind(self, name: str) -> str | None:
-        """Return the declared kind of ``name``, or ``None`` if unknown/ambiguous."""
-        entries = self.types.get(name)
-        if not entries:
-            return None
-        kinds = {kind for kind, _ in entries}
-        return kinds.pop() if len(kinds) == 1 else None
+    @staticmethod
+    def _scoped_names(name: str, scope: tuple[str, ...]) -> list[str]:
+        """Return the keys to try for ``name``, innermost enclosing scope first.
 
-    def type_id(self, name: str) -> str | None:
-        """Return the node ID declaring ``name``, or ``None`` if unknown/ambiguous."""
-        entries = self.types.get(name)
-        if not entries or len(entries) != 1:
-            return None
-        return entries[0][1]
+        Swift resolves a type name outward through the enclosing scopes before
+        reaching file scope, and a nested type is *not* visible by its bare
+        name from outside the type that declares it.  So ``Result`` written
+        inside ``PathMonitor`` tries ``PathMonitor.Result`` first and bare
+        ``Result`` last, while ``Result`` written at file scope tries only the
+        bare name -- and therefore misses a nested declaration, which is the
+        correct answer.  Without this, a uniquely-named nested type captures
+        every same-named reference in the repository, including references to
+        a standard-library type of that name.
+
+        :param name: Type name as written.  Already-qualified names are used
+            as-is.
+        :param scope: Enclosing type names, outermost first.
+        """
+        if "." in name or not scope:
+            return [name]
+        nested = [".".join((*scope[:depth], name)) for depth in range(len(scope), 0, -1)]
+        return [*nested, name]
+
+    def type_kind(self, name: str, scope: tuple[str, ...] = ()) -> str | None:
+        """Return the declared kind of ``name``, or ``None`` if unknown/ambiguous.
+
+        :param scope: Enclosing type names, so a nested declaration can shadow
+            an outer one exactly as it does in Swift.
+        """
+        for key in self._scoped_names(name, scope):
+            entries = self.types.get(key)
+            if not entries:
+                continue
+            kinds = {kind for kind, _ in entries}
+            return kinds.pop() if len(kinds) == 1 else None
+        return None
+
+    def type_id(self, name: str, scope: tuple[str, ...] = ()) -> str | None:
+        """Return the node ID declaring ``name``, or ``None`` if unknown/ambiguous.
+
+        :param scope: Enclosing type names, so a nested declaration can shadow
+            an outer one exactly as it does in Swift.
+        """
+        for key in self._scoped_names(name, scope):
+            entries = self.types.get(key)
+            if not entries:
+                continue
+            return entries[0][1] if len(entries) == 1 else None
+        return None
 
     def resolve_call(
         self,
@@ -660,6 +735,7 @@ class SymbolTable:
         callee: str,
         enclosing_type: str,
         enclosing_super: str = "",
+        scope: tuple[str, ...] = (),
     ) -> str | None:
         """Resolve a call to a node ID, or ``None`` when it cannot be pinned down.
 
@@ -694,7 +770,7 @@ class SymbolTable:
 
             # `Point(x: 1, y: 2)` is an initializer call, which in Swift is
             # written exactly like a function call on the type's own name.
-            type_hit = self.type_id(callee)
+            type_hit = self.type_id(callee, scope)
             if type_hit is not None:
                 return type_hit
 
@@ -925,7 +1001,7 @@ class _FileWalker:
         node_id = _make_node_id(kind, self.rel_path, qualname)
 
         if self.collect_only:
-            self.symbols.add_type(name, kind, node_id)
+            self.symbols.add_type(qualname, kind, node_id)
         else:
             self._emitted.append(
                 NodeSpec(
@@ -946,7 +1022,7 @@ class _FileWalker:
             self._emitted.append(
                 EdgeSpec(source_id=owner_id, target_id=node_id, relation="CONTAINS")
             )
-            self._emit_inheritance(node, subject_id=node_id, subject_kind=kind)
+            self._emit_inheritance(node, subject_id=node_id, subject_kind=kind, scope=scope)
 
         # A protocol requirement has the protocol's own access level and cannot
         # declare a different one. Every other type's members default to
@@ -957,7 +1033,7 @@ class _FileWalker:
             owner_id=node_id,
             scope=(*scope, name),
             enclosing_type=name,
-            enclosing_super=self._superclass_of(node, kind),
+            enclosing_super=self._superclass_of(node, kind, scope),
             member_visibility=own_visibility if kind == "protocol" else None,
         )
 
@@ -1071,17 +1147,31 @@ class _FileWalker:
             member_visibility=member_visibility,
         )
 
-    def _emit_inheritance(self, node: Any, *, subject_id: str, subject_kind: str) -> None:
+    def _emit_inheritance(
+        self,
+        node: Any,
+        *,
+        subject_id: str,
+        subject_kind: str,
+        scope: tuple[str, ...] = (),
+    ) -> None:
         """Split an inheritance clause into INHERITS and CONFORMS edges.
 
         Swift gives no syntactic signal, so this asks the symbol table what the
         target actually is. When the target is external and unresolvable, it
         falls back to the language rule: only a class or actor may have a
         superclass, and the superclass must be written first.
+
+        :param scope: Enclosing type names, used to resolve the clause from the
+            declaration's own scope outward.
         """
         for position, base in enumerate(_inheritance_targets(node, self.source)):
-            target_kind = self.symbols.type_kind(base)
-            target_id = self.symbols.type_id(base) or f"sym:{base}"
+            if position == 0 and subject_kind == "enum" and base in _RAW_VALUE_TYPES:
+                # `enum Sections: Int` declares a raw value, not a conformance.
+                continue
+
+            target_kind = self.symbols.type_kind(base, scope)
+            target_id = self.symbols.type_id(base, scope) or f"sym:{base}"
 
             if target_kind == "protocol" or base in _KNOWN_EXTERNAL_PROTOCOLS:
                 relation = "CONFORMS"
@@ -1150,6 +1240,7 @@ class _FileWalker:
             source_id=node_id,
             enclosing_type=enclosing_type,
             enclosing_super=enclosing_super,
+            scope=scope,
         )
 
     def _handle_property(
@@ -1218,6 +1309,7 @@ class _FileWalker:
             source_id=node_id,
             enclosing_type=enclosing_type,
             enclosing_super=enclosing_super,
+            scope=scope,
         )
 
     def _handle_typealias(
@@ -1292,14 +1384,17 @@ class _FileWalker:
     # Superclass lookup
     # ------------------------------------------------------------------
 
-    def _superclass_of(self, node: Any, kind: str) -> str:
-        """Return the name of a declaration's superclass, or ``""`` if it has none."""
+    def _superclass_of(self, node: Any, kind: str, scope: tuple[str, ...] = ()) -> str:
+        """Return the name of a declaration's superclass, or ``""`` if it has none.
+
+        :param scope: Enclosing type names, resolved outward as Swift does.
+        """
         if kind not in _SUPERCLASS_KINDS:
             return ""
         for position, base in enumerate(_inheritance_targets(node, self.source)):
             if base in _KNOWN_EXTERNAL_PROTOCOLS:
                 continue
-            target_kind = self.symbols.type_kind(base)
+            target_kind = self.symbols.type_kind(base, scope)
             if target_kind in _SUPERCLASS_KINDS:
                 return base
             if target_kind is None and position == 0:
@@ -1317,6 +1412,7 @@ class _FileWalker:
         source_id: str,
         enclosing_type: str,
         enclosing_super: str,
+        scope: tuple[str, ...] = (),
     ) -> None:
         body = node.child_by_field_name("body") or node.child_by_field_name("computed_value")
         if body is None:
@@ -1324,7 +1420,9 @@ class _FileWalker:
 
         seen: set[str] = set()
         for receiver, callee in self._collect_calls(body):
-            target_id = self.symbols.resolve_call(receiver, callee, enclosing_type, enclosing_super)
+            target_id = self.symbols.resolve_call(
+                receiver, callee, enclosing_type, enclosing_super, scope
+            )
             if target_id is None:
                 target_id = f"sym:{callee}"
             if target_id == source_id or target_id in seen:

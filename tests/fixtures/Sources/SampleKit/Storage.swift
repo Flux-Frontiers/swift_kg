@@ -58,3 +58,42 @@ public enum StorageError: Error {
 func logAccess() {
     print("access")
 }
+
+/// Watches a path, and owns two nested types.
+public struct PathMonitor {
+    /// Shares its bare name with the standard library's `Result`.  From
+    /// outside `PathMonitor` it answers only to `PathMonitor.Result`.
+    enum Result {
+        case available
+        case timeout
+    }
+
+    /// Instantiated from inside the declaring scope, where the bare name is
+    /// the one Swift resolves.
+    struct Config {
+        let timeout: Double
+    }
+
+    func makeConfig() -> Config {
+        return Config(timeout: 1.0)
+    }
+}
+
+/// Extends the *standard library's* `Result`.  `PathMonitor.Result` is not
+/// visible by its bare name here, so this must not attach to it.
+extension Result {
+    var isStorageFailure: Bool { false }
+}
+
+/// `: Int` declares a raw value, not a conformance -- `Int` is not a protocol.
+public enum Section: Int {
+    case first
+    case second
+}
+
+/// A raw type followed by a real conformance.
+public enum Label: String, Auditable {
+    case short
+
+    public func audit() -> String { "label" }
+}

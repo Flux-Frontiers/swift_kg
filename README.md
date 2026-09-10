@@ -5,9 +5,10 @@
 [![PyPI](https://img.shields.io/pypi/v/swift-kg.svg)](https://pypi.org/project/swift-kg/)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/Flux-Frontiers/swift_kg/releases)
 [![CI](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml)
+[![Docs](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 
-Knowledge graph for Swift codebases — deterministic AST extraction, hybrid semantic + structural search.
+Knowledge graph for Swift codebases -- deterministic AST extraction, hybrid semantic + structural search.
 
 ## Overview
 

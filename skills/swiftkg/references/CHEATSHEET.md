@@ -27,6 +27,8 @@ Bounds: `-k` 1–100, `--hop` 0–5, `--max-nodes` 1–500, query ≤ 500 chars.
 ```bash
 swiftkg analyze REPO                       # 14-phase Markdown report
 swiftkg analyze REPO -o report.md --write-centrality
+swiftkg analyze REPO --include-dir Source   # match how the graph was built
+swiftkg analyze REPO -j results.json -q     # JSON results, no progress
 swiftkg explain NODE_ID --repo REPO
 swiftkg centrality --db .swiftkg/graph.sqlite --top 25
 swiftkg centrality --group-by module

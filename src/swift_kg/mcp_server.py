@@ -30,10 +30,10 @@ get_node(node_id, include_edges)
 graph_stats()
     Return node and edge counts by kind/relation as Markdown.
 
-list_nodes(module_path, kind)
+list_nodes(module_path, kind, limit)
     List nodes filtered by module path prefix and/or kind.
 
-find_node(name, kind)
+find_node(name, kind, limit)
     Find nodes by plain name or qualname substring.
 
 centrality(top, kinds, group_by)
@@ -90,6 +90,7 @@ from mcp.server.fastmcp import FastMCP
 
 from swift_kg.kg import SwiftKG
 from swift_kg.snapshots import SnapshotManager
+from swift_kg.validation import bounded_int, normalize_node_id, require_query
 
 # ---------------------------------------------------------------------------
 # Global state — initialised in main()
@@ -196,8 +197,11 @@ mcp = FastMCP(
         "from Swift access levels stored on each node rather than inferred.\n\n"
         "**get_node(node_id, include_edges)** — Precise lookup of a single node by its stable "
         "ID (e.g. 'cls:Sources/Networking/Client.swift:HTTPClient').\n\n"
-        "**list_nodes(module_path, kind)** — List nodes filtered by module path and/or kind.\n\n"
-        "**find_node(name, kind)** — Find nodes by name substring when the stable ID is unknown.\n\n"
+        "**list_nodes(module_path, kind, limit)** — List nodes filtered by module path and/or "
+        "kind. `limit` defaults to 500; an unfiltered call on a large repository would otherwise "
+        "return every node.\n\n"
+        "**find_node(name, kind, limit)** — Find nodes by name substring when the stable ID is "
+        "unknown. `limit` defaults to 100.\n\n"
         "**centrality(top, kinds, group_by)** — Structural Importance Ranking (SIR): "
         "deterministic weighted PageRank over the graph. group_by='node' ranks individual "
         "nodes; group_by='module' aggregates per module. Use to find hotspots before "
@@ -236,7 +240,14 @@ mcp = FastMCP(
         "- **Identify structural hotspots**: centrality(top=20) or centrality(group_by='module')\n"
         "- **Architecture review**: analyze_repo\n"
         "- **Track codebase evolution**: snapshot_list → snapshot_diff(key_a, key_b)\n"
-        "- **Answer 'how does X work?'**: pack_snippets with a descriptive query\n"
+        "- **Answer 'how does X work?'**: pack_snippets with a descriptive query\n\n"
+        "## Argument bounds\n\n"
+        "Out-of-range arguments are rejected with a message naming the accepted range, rather "
+        "than silently clamped — a truncated result that looks complete is worse than an error. "
+        "`k` 1-100, `hop` 0-5, `max_nodes` 1-500, `max_lines` 1-2000, `radius` 0-5, "
+        "`top` 1-1000, `limit` 1-5000 (`snapshot_list` accepts 0 for 'all'), "
+        "queries at most 500 characters. A `node_id` may be passed with surrounding backticks "
+        "or quotes; it is normalized before use.\n"
     ),
 )
 
@@ -438,6 +449,14 @@ def type_hierarchy(node_id: str) -> str:
     :return: JSON with ``node``, ``conformers``, ``subclasses``, ``extensions``,
              ``conforms_to`` and ``inherits_from``.
     """
+    try:
+        # `kg.node()` normalizes internally, but the raw argument is reused
+        # below for edges_from — so a backticked ID would resolve for the
+        # lookup and then silently match no edges.
+        node_id = normalize_node_id(node_id)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
     kg = _get_kg()
     node = kg.node(node_id)
     if node is None:
@@ -488,7 +507,11 @@ def public_api(module_path: str = "", limit: int = 100) -> str:
     :return: JSON with ``count`` and a ``declarations`` list, each carrying its
              ``visibility``.
     """
-    limit = max(1, min(int(limit), 1000))
+    try:
+        limit = bounded_int("limit", limit, 1, 1000)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
     con = _get_kg().store.con
     sql = """
         SELECT id, kind, name, qualname, module_path, docstring,
@@ -647,6 +670,7 @@ def graph_stats() -> str:
 def list_nodes(
     module_path: str = "",
     kind: str = "",
+    limit: int = 500,
 ) -> str:
     """
     List nodes filtered by module path prefix and/or kind.
@@ -656,6 +680,11 @@ def list_nodes(
                  actor | extension | function | method | property | typealias.
     :return: JSON array of matching node dicts.
     """
+    try:
+        limit = bounded_int("limit", limit, 1, 5000)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
     kg = _get_kg()
     store = getattr(kg, "_store", None)
     if not store:
@@ -672,7 +701,8 @@ def list_nodes(
         q += " AND kind = ?"
         params.append(kind)
 
-    q += " ORDER BY module_path, lineno"
+    q += " ORDER BY module_path, lineno LIMIT ?"
+    params.append(limit)
 
     try:
         rows = store.con.execute(q, params).fetchall()
@@ -698,7 +728,7 @@ def list_nodes(
 
 
 @mcp.tool()
-def find_node(name: str, kind: str = "") -> str:
+def find_node(name: str, kind: str = "", limit: int = 100) -> str:
     """
     Find graph nodes by name without knowing their full stable ID.
 
@@ -709,6 +739,12 @@ def find_node(name: str, kind: str = "") -> str:
     :param kind: Optional kind filter: module | class | struct | protocol | function | method | etc.
     :return: JSON array of matching node dicts.
     """
+    try:
+        name = require_query(name)
+        limit = bounded_int("limit", limit, 1, 5000)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
     kg = _get_kg()
     store = getattr(kg, "_store", None)
     if not store:
@@ -724,7 +760,8 @@ def find_node(name: str, kind: str = "") -> str:
     if kind:
         q += " AND kind = ?"
         params.append(kind)
-    q += " ORDER BY module_path, lineno"
+    q += " ORDER BY module_path, lineno LIMIT ?"
+    params.append(limit)
 
     try:
         rows = store.con.execute(q, params).fetchall()
@@ -781,6 +818,11 @@ def centrality(
                      ``module`` aggregates node scores per module.
     :return: Markdown-formatted ranking table.
     """
+    try:
+        top = bounded_int("top", top, 1, 1000)
+    except ValueError as exc:
+        return f"## Invalid Argument\n\n{exc}"
+
     try:
         from swift_kg.centrality import (  # noqa: PLC0415
             StructuralImportanceRanker,
@@ -898,6 +940,11 @@ def framework_nodes(top: int = 20) -> str:
     :return: Markdown-formatted ranking table of framework nodes.
     """
     try:
+        top = bounded_int("top", top, 1, 1000)
+    except ValueError as exc:
+        return f"## Invalid Argument\n\n{exc}"
+
+    try:
         from swift_kg.bridge import compute_bridge_centrality  # noqa: PLC0415
         from swift_kg.centrality import StructuralImportanceRanker  # noqa: PLC0415
         from swift_kg.framework_detector import detect_framework_nodes  # noqa: PLC0415
@@ -958,6 +1005,11 @@ def find_definition_at(file: str, line: int) -> str:
     :return: Markdown explanation from ``explain()``, or an informative error
              message if no node spans that location.
     """
+    try:
+        line = bounded_int("line", line, 1, 10_000_000)
+    except ValueError as exc:
+        return f"## Invalid Argument\n\n{exc}"
+
     kg = _get_kg()
     store = getattr(kg, "_store", None) or getattr(kg, "store", None)
     if store is None:
@@ -1019,8 +1071,8 @@ def analyze_repo() -> str:
 
     from rich.console import Console  # noqa: PLC0415
 
-    from swift_kg.analysis import SwiftKGAnalyzer  # noqa: PLC0415
     from swift_kg.kg import _render_analysis  # noqa: PLC0415
+    from swift_kg.swiftkg_thorough_analysis import SwiftKGAnalyzer  # noqa: PLC0415
 
     # Silence Rich output — stdout carries the MCP protocol on stdio transport.
     silent = Console(file=StringIO(), highlight=False)
@@ -1063,6 +1115,15 @@ def explain(node_id: str, limit: int = 10) -> str:
     """
     from swift_kg.explain import render_explain  # noqa: PLC0415
 
+    # Validated before the KG is touched, so a bad argument is reported the
+    # same way whether or not the server holds a graph. `render_explain`
+    # re-checks for its CLI caller; both checks are idempotent.
+    try:
+        node_id = normalize_node_id(node_id)
+        limit = bounded_int("limit", limit, 0, 1000)
+    except ValueError as exc:
+        return f"## Invalid Argument\n\n{exc}"
+
     return render_explain(
         _get_kg(),
         node_id,
@@ -1104,6 +1165,11 @@ def rank_nodes(
         compute_coderank,
         persist_metric_scores,
     )
+
+    try:
+        top = bounded_int("top", top, 1, 1000)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
 
     db_path = str(_get_kg().db_path)
     rel_list = [r.strip() for r in rels.split(",") if r.strip()]
@@ -1280,6 +1346,11 @@ def explain_rank(node_id: str, q: str = "") -> str:
         compute_seed_proximity,
     )
 
+    try:
+        node_id = normalize_node_id(node_id)
+    except ValueError as exc:
+        return f"## Invalid Argument\n\n{exc}"
+
     kg = _get_kg()
     db_path = str(kg.db_path)
 
@@ -1406,6 +1477,12 @@ def snapshot_list(limit: int = 10, branch: str = "") -> str:
                    (e.g. ``"main"`` or ``"develop"``).
     :return: JSON array of snapshot metadata dicts, most recent first.
     """
+    try:
+        # 0 keeps its documented meaning of "all", so the floor is 0, not 1.
+        limit = bounded_int("limit", limit, 0, 1000)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
     mgr = _get_snapshot_mgr()
     snapshots = mgr.list_snapshots(
         limit=limit if limit > 0 else None,

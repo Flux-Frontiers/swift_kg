@@ -105,3 +105,141 @@ class TestBuildCommand:
         runner.invoke(cli, ["build-sqlite", "--repo", str(tmp_repo)])
         result = runner.invoke(cli, ["explain", "cls:nope.swift:Nope", "--repo", str(tmp_repo)])
         assert result.exit_code == 1
+
+
+@pytest.mark.skipif(not _HAS_TREE_SITTER, reason="tree-sitter-swift not installed")
+class TestDirectoryScoping:
+    """`--include-dir` / `--exclude-dir`, matching `pycodekg`.
+
+    A Swift repository almost never has a `pyproject.toml`, so these flags are
+    the only reachable way to scope a build on most repositories -- without
+    them, test and example sources land in the graph and skew every metric the
+    report computes.
+    """
+
+    def _modules(self, repo: Path) -> set[str]:
+        import sqlite3
+
+        con = sqlite3.connect(repo / ".swiftkg" / "graph.sqlite")
+        try:
+            rows = con.execute("SELECT module_path FROM nodes WHERE kind = 'module'")
+            return {row[0] for row in rows}
+        finally:
+            con.close()
+
+    def test_without_flags_every_directory_is_indexed(
+        self, runner: CliRunner, tmp_repo: Path
+    ) -> None:
+        runner.invoke(cli, ["build-sqlite", "--repo", str(tmp_repo)])
+        assert len(self._modules(tmp_repo)) == 2
+
+    def test_exclude_dir_drops_a_directory_at_any_depth(
+        self, runner: CliRunner, tmp_repo: Path
+    ) -> None:
+        result = runner.invoke(
+            cli, ["build-sqlite", "--repo", str(tmp_repo), "--exclude-dir", "SampleApp"]
+        )
+        assert result.exit_code == 0, result.output
+        modules = self._modules(tmp_repo)
+        assert modules == {"Sources/SampleKit/Storage.swift"}
+
+    def test_include_dir_names_a_top_level_directory(
+        self, runner: CliRunner, tmp_repo: Path
+    ) -> None:
+        result = runner.invoke(
+            cli, ["build-sqlite", "--repo", str(tmp_repo), "--include-dir", "Sources"]
+        )
+        assert result.exit_code == 0, result.output
+        assert len(self._modules(tmp_repo)) == 2
+
+    def test_build_accepts_the_same_flags(self, runner: CliRunner, tmp_repo: Path) -> None:
+        result = runner.invoke(
+            cli,
+            ["build", "--repo", str(tmp_repo), "--graph-only", "--exclude-dir", "SampleKit"],
+        )
+        assert result.exit_code == 0, result.output
+        assert self._modules(tmp_repo) == {"Sources/SampleApp/Geometry.swift"}
+
+    @pytest.mark.parametrize("command", ["analyze", "build", "build-sqlite", "update"])
+    def test_the_flags_are_documented(self, runner: CliRunner, command: str) -> None:
+        result = runner.invoke(cli, [command, "--help"])
+        assert "--include-dir" in result.output
+        assert "--exclude-dir" in result.output
+
+
+@pytest.mark.skipif(not _HAS_TREE_SITTER, reason="tree-sitter-swift not installed")
+class TestAnalyzeSnapshotHistory:
+    """`analyze` has to see the snapshots `init` and `snapshot save` wrote.
+
+    Without a SnapshotManager the phase reports "skipped", which the report
+    renders as "No snapshots" -- indistinguishable from a repository that has
+    never captured one.
+    """
+
+    def test_snapshot_history_is_loaded(
+        self, runner: CliRunner, tmp_repo: Path, tmp_path: Path
+    ) -> None:
+        runner.invoke(cli, ["build-sqlite", "--repo", str(tmp_repo)])
+        saved = runner.invoke(cli, ["snapshot", "save", "0.1.0", "--repo", str(tmp_repo)])
+        assert saved.exit_code == 0, saved.output
+
+        report = tmp_path / "report.md"
+        result = runner.invoke(cli, ["analyze", str(tmp_repo), "-o", str(report)])
+        assert result.exit_code == 0, result.output
+        assert "Snapshot history  1 snapshot(s)" in result.output
+        assert "No snapshots." not in report.read_text()
+
+    def test_no_snapshot_dir_is_still_reported_honestly(
+        self, runner: CliRunner, tmp_repo: Path, tmp_path: Path
+    ) -> None:
+        runner.invoke(cli, ["build-sqlite", "--repo", str(tmp_repo)])
+        report = tmp_path / "report.md"
+        result = runner.invoke(cli, ["analyze", str(tmp_repo), "-o", str(report)])
+        assert result.exit_code == 0, result.output
+        assert "No snapshots." in report.read_text()
+
+    def test_the_written_report_is_announced_once(
+        self, runner: CliRunner, tmp_repo: Path, tmp_path: Path
+    ) -> None:
+        """Both the analyzer and the CLI used to print the same line."""
+        runner.invoke(cli, ["build-sqlite", "--repo", str(tmp_repo)])
+        report = tmp_path / "report.md"
+        result = runner.invoke(cli, ["analyze", str(tmp_repo), "-o", str(report)])
+        assert result.output.count("Report written to") == 1
+
+
+@pytest.mark.skipif(not _HAS_TREE_SITTER, reason="tree-sitter-swift not installed")
+class TestAnalyzeOutputs:
+    """`-j/--json` and `-q/--quiet`, matching `pycodekg analyze`."""
+
+    def test_json_snapshot_is_written(self, runner: CliRunner, tmp_repo: Path) -> None:
+        import json
+
+        runner.invoke(cli, ["build-sqlite", "--repo", str(tmp_repo)])
+        out = tmp_repo / "results.json"
+        result = runner.invoke(
+            cli,
+            ["analyze", str(tmp_repo), "-o", str(tmp_repo / "r.md"), "-j", str(out)],
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(out.read_text())["quality"]["grade"]
+
+    def test_quiet_suppresses_phase_progress(self, runner: CliRunner, tmp_repo: Path) -> None:
+        runner.invoke(cli, ["build-sqlite", "--repo", str(tmp_repo)])
+        noisy = runner.invoke(cli, ["analyze", str(tmp_repo), "-o", str(tmp_repo / "a.md")])
+        quiet = runner.invoke(
+            cli, ["analyze", str(tmp_repo), "-o", str(tmp_repo / "b.md"), "--quiet"]
+        )
+        assert "Phase" in noisy.output
+        assert "Phase" not in quiet.output
+
+    def test_a_missing_graph_exits_nonzero(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Scripting needs a failed analysis distinguishable from a clean one."""
+        result = runner.invoke(cli, ["analyze", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "swiftkg build" in result.output
+
+    def test_the_flags_are_documented(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["analyze", "--help"])
+        for flag in ("--json", "--quiet", "--report", "--include-dir"):
+            assert flag in result.output

@@ -22,6 +22,8 @@ from pathlib import Path
 import click
 from rich.console import Console
 
+from swift_kg.cli.options import exclude_option, include_option
+
 console = Console()
 
 
@@ -54,6 +56,8 @@ def _build_options(fn):
                 default=False,
                 help="Build vector index only; graph must already exist.",
             ),
+            include_option,
+            exclude_option,
         ]
     ):
         fn = option(fn)
@@ -68,8 +72,14 @@ def _run(
     graph_only: bool,
     index_only: bool,
     wipe: bool,
+    include_dir: tuple[str, ...] = (),
+    exclude_dir: tuple[str, ...] = (),
 ) -> None:
-    """Shared body for ``build`` and ``update``."""
+    """Shared body for ``build`` and ``update``.
+
+    ``include_dir``/``exclude_dir`` scope extraction, so they are left empty by
+    ``build-index``, which indexes a graph that already exists.
+    """
     from swift_kg.kg import SwiftKG  # pylint: disable=import-outside-toplevel
 
     repo_path = Path(repo).resolve()
@@ -81,6 +91,8 @@ def _run(
         repo_root=repo_path,
         db_path=db,
         vectors_path=vectors,
+        include=set(include_dir),
+        exclude=set(exclude_dir),
     )
 
     console.print(f"[bold]SwiftKG {'build' if wipe else 'update'}[/bold]")
@@ -116,6 +128,8 @@ def build(
     vectors: str | None,
     graph_only: bool,
     index_only: bool,
+    include_dir: tuple[str, ...],
+    exclude_dir: tuple[str, ...],
 ) -> None:
     """Build knowledge graph from scratch: wipes existing data, then extracts
     Swift AST -> graph store -> vector index."""
@@ -125,6 +139,8 @@ def build(
         vectors=vectors,
         graph_only=graph_only,
         index_only=index_only,
+        include_dir=include_dir,
+        exclude_dir=exclude_dir,
         wipe=True,
     )
 
@@ -137,6 +153,8 @@ def update(
     vectors: str | None,
     graph_only: bool,
     index_only: bool,
+    include_dir: tuple[str, ...],
+    exclude_dir: tuple[str, ...],
 ) -> None:
     """Update knowledge graph incrementally: upserts changes without wiping
     existing data."""
@@ -146,6 +164,8 @@ def update(
         vectors=vectors,
         graph_only=graph_only,
         index_only=index_only,
+        include_dir=include_dir,
+        exclude_dir=exclude_dir,
         wipe=False,
     )
 
@@ -179,7 +199,15 @@ def update(
     default=False,
     help="Clear existing graph data before extracting.",
 )
-def build_sqlite(repo: str, db: str | None, wipe: bool) -> None:
+@include_option
+@exclude_option
+def build_sqlite(
+    repo: str,
+    db: str | None,
+    wipe: bool,
+    include_dir: tuple[str, ...],
+    exclude_dir: tuple[str, ...],
+) -> None:
     """Extract a Swift knowledge graph and store it in SQLite.
 
     The graph half of `build`; skips the vector index.
@@ -190,6 +218,8 @@ def build_sqlite(repo: str, db: str | None, wipe: bool) -> None:
         vectors=None,
         graph_only=True,
         index_only=False,
+        include_dir=include_dir,
+        exclude_dir=exclude_dir,
         wipe=wipe,
     )
 

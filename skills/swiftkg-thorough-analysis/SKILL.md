@@ -62,9 +62,41 @@ swiftkg analyze /path/to/repo -o analysis.md --write-centrality
 
 # Non-default artifact paths
 swiftkg analyze /path/to/repo --db /path/to/graph.sqlite --vectors /path/to/vectors.sqlite
+
+# State which directories the graph covers, for the report header
+swiftkg analyze /path/to/repo --include-dir Source
+
+# Machine-readable results alongside the Markdown; -q drops the progress lines
+swiftkg analyze /path/to/repo -o analysis.md -j results.json --quiet
 ```
 
+`main()` in `swift_kg/swiftkg_thorough_analysis.py` backs the CLI, the module's
+`__main__` guard and any programmatic caller, so `python
+src/swift_kg/swiftkg_thorough_analysis.py` runs the same analysis over the
+current directory. Prefer reading `-j` output over parsing the Markdown: it
+carries every phase's results plus the headline `quality` block (`score`,
+`grade`, `label`).
+
 Prerequisite: the graph must exist (`swiftkg build --repo /path/to/repo`). If results look stale, re-run `build` — it always wipes first.
+
+**Scope the build, or read the grade with suspicion.** The analyzer measures
+whatever the graph holds, and a Swift repository keeps its tests and sample
+apps in the tree. On Alamofire, `Tests/` and `Example/` were 1665 of 3528
+nodes at 3.5% doc-comment coverage against `Source/`'s 56.5% — which blended
+to 31.5% and graded the repository an F, while putting two test-support files
+in the top three of every structural ranking. Build with
+`swiftkg build --repo REPO --include-dir Source` (the directory name varies:
+SwiftPM uses `Sources/`) and pass the same flags to `analyze` so the report
+header records the scope.
+
+Excluding tests has one reverse artifact worth knowing: anything called only
+from tests then has no visible callers. A `public` or `open` declaration is
+never reported as an orphan -- its callers are outside the repository by
+definition -- but an `internal` helper exercised only by `@testable import`
+will be. Two smaller categories also survive the filter: an operator
+declaration (`static func -`) is never matched by its infix call site, and a
+method satisfying a protocol requirement is reached through dispatch rather
+than a direct call.
 
 Alternatively, from an MCP session simply call `analyze_repo()` — same analysis, returned as Markdown.
 
@@ -128,6 +160,10 @@ Alternatively, from an MCP session simply call `analyze_repo()` — same analysi
 swiftkg analyze .                                   # current directory
 swiftkg analyze /path/to/repo -o /tmp/analysis.md   # custom report path
 swiftkg analyze . --write-centrality                # persist SIR scores
+swiftkg analyze . --include-dir Source              # declare the indexed scope
+swiftkg analyze . --exclude-dir Tests               # ...or name what was skipped
+swiftkg analyze . -j results.json                   # JSON results for an agent
+swiftkg analyze . -o report.md -q                   # suppress phase progress
 swiftkg-analyze /path/to/repo                       # script-alias form
 ```
 

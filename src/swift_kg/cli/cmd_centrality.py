@@ -24,7 +24,23 @@ import click
     "--kind",
     "kinds",
     multiple=True,
-    type=click.Choice(["module", "class", "interface", "function", "method"], case_sensitive=False),
+    type=click.Choice(
+        # Swift's type declarations, not PyCodeKG's. There is no `interface` in
+        # Swift; `struct`, `enum`, `actor`, `protocol` and `extension` are all
+        # first-class node kinds the extractor emits.
+        [
+            "module",
+            "class",
+            "struct",
+            "enum",
+            "actor",
+            "protocol",
+            "extension",
+            "function",
+            "method",
+        ],
+        case_sensitive=False,
+    ),
     help="Restrict output to one or more node kinds.",
 )
 @click.option("--top", type=int, default=25, show_default=True, help="Maximum rows to show.")

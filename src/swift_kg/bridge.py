@@ -26,6 +26,7 @@ import sqlite3
 from collections import defaultdict
 
 from swift_kg.centrality import CentralityRecord, StructuralImportanceRanker
+from swift_kg.validation import bounded_int
 
 
 def compute_bridge_centrality(
@@ -49,10 +50,15 @@ def compute_bridge_centrality(
         True). Retained for CLI parity with the sibling modules; in Swift,
         IMPORTS edges point at ``sym:`` module stubs with no module_path and
         so are already excluded by the join, making this flag a no-op.
-    :param top: Number of top modules to return (default 25)
+    :param top: Number of top modules to return (1-1000, default 25)
     :param db_path: Path to SQLite database
     :return: List of (module_path, connectivity_score) tuples
     """
+    # Validated here rather than per caller: `swiftkg bridges`,
+    # `swiftkg framework-nodes` and the bridge_centrality / framework_nodes MCP
+    # tools all funnel through this function (FLEET_STANDARDS, 2026-08-24).
+    top = bounded_int("top", top, 1, 1000)
+
     with sqlite3.connect(db_path) as con:
         rows = con.execute(
             """
