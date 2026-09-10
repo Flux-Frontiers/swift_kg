@@ -73,6 +73,7 @@ nav:
       - Core:
           - Knowledge graph: api/kg.md
           - Swift extractor: api/extractor.md
+          - Symbol resolution: api/resolution.md
           - Configuration: api/config.md
           - Boundary validation: api/validation.md
       - Analysis:
