@@ -7,6 +7,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A mkdocs-material documentation site**, matching `gutenberg_kg` and
+  `quiltwright`: `mkdocs.yml`, `docs/index.md`, twelve `docs/api/*.md`
+  mkdocstrings stubs, a `docs` Poetry group (`mkdocs-material`,
+  `mkdocstrings[python]`), a `Makefile` with `docs` / `docs-serve`, and a
+  `Docs` workflow that publishes to GitHub Pages on every push to `main` that
+  touches `docs/`, `src/swift_kg/` or `mkdocs.yml`. The API reference is
+  generated from the package's own docstrings, so it cannot drift from the
+  code. mkdocstrings reads the source statically through `paths: [src]` rather
+  than importing `swift_kg`, so the docs job installs no extras. The theme
+  names no logo or favicon: this repo ships no brand assets, and naming files
+  that do not exist would give the site two silent 404s. SwiftKG is the first
+  of the three code-KG modules to carry a site; PyCodeKG and TypeScriptKG have
+  none yet.
+- **`--include-dir` / `--exclude-dir` on `build`, `update`, `build-sqlite` and
+  `analyze`**, matching `pycodekg`. The `[tool.swiftkg]` config they union with
+  was already read, but `_scaffold_swiftkg_config` only writes it into an
+  existing `pyproject.toml` and a Swift repository rarely has one -- so on most
+  real repositories scoping a build was unreachable. Indexing `Tests/` and
+  `Example/` alongside `Source/` skews every metric the report computes: on
+  Alamofire they were 1665 of 3528 nodes at 3.5% doc-comment coverage against
+  `Source/`'s 56.5%, which blended to the 31.5% that drove an F grade, and put
+  two test-support files in the top three of every structural ranking.
+  `swiftkg build --include-dir Source` now reports 57.0% and a D.
+- `swift_kg.cli.options`, holding the two shared option decorators, mirroring
+  `pycode_kg.cli.options`.
+- **A `main()` entry point and `__main__` guard** in the thorough-analysis
+  module, matching `pycodekg_thorough_analysis.main` parameter for parameter.
+  It is the single path behind `swiftkg analyze`, a standalone
+  `python src/swift_kg/swiftkg_thorough_analysis.py`, and any programmatic
+  caller, so all three behave identically. Unlike the PyCodeKG original it
+  returns the compiled results rather than `None`; an empty dict means the
+  graph was missing, which is how the CLI knows to exit non-zero. The module
+  previously carried a `#!/usr/bin/env python3` shebang with no entry point to
+  justify it.
+- **`-j/--json` and `-q/--quiet` on `swiftkg analyze`**, completing the flag
+  parity with `pycodekg analyze`. `_compile_results()` already produced a
+  serialisable dict and was already tested as such; nothing consumed it.
+- **A `quality` block in the compiled results** (`score`, `grade`, `label`),
+  so a JSON consumer need not recompute the report's headline number. PyCodeKG
+  also carries a per-component breakdown, which SwiftKG does not track.
+- **Argument bounds across the MCP surface**, and an "Argument bounds" section
+  in the `FastMCP` instructions so an agent learns the ranges without trial and
+  error. `list_nodes` and `find_node` gained a bounded `limit` (defaults 500
+  and 100): an unfiltered `list_nodes()` previously serialised every node in
+  the repository, and `find_node("")` became `LIKE '%%'` over the whole graph.
+
+### Changed
+
+- **`analysis.py` is now `swiftkg_thorough_analysis.py`**, matching
+  `pycode_kg`'s module name. This is a deliberate divergence from `tscode_kg`,
+  which calls its equivalent `analysis.py` as SwiftKG did: the fleet-parity
+  rule names both PyCodeKG and TypeScriptKG as references, and they disagree
+  here. Chosen by the maintainer so the thorough-analysis module is findable
+  under one name across the fleet. No public behaviour changes; `SwiftKGAnalyzer`
+  is still re-exported from `swift_kg`, and no documentation referenced the old
+  path.
+
+- **`[tool.dockg]` now declares `exclude`, not `include`.** DocKG reads only
+  `[tool.dockg].exclude`; it has no `include` key and no `--include-dir` flag,
+  so an `include` list is silently ignored. The corpus is therefore defined by
+  what is left out: `docs/`, `skills/` and the root Markdown files are indexed,
+  while `src/` and `tests/` (PyCodeKG's) and the `.pycodekg/`, `.swiftkg/` and
+  `.kgcache/` artifact directories are not. `.kgcache/` matters in particular --
+  it holds the downloaded embedding model, whose HuggingFace model card is a
+  Markdown file that would otherwise be indexed as project documentation. The
+  dotdirs sibling repos also list are already in DocKG's own `SKIP_DIRS` and are
+  not duplicated.
+
+### Fixed
+
+- **A nested type no longer captures same-named references repository-wide.**
+  The symbol table keyed every declared type by its bare name, so a nested
+  type with a repo-unique bare name absorbed every reference to that name --
+  including references to a standard-library type of the same name, which the
+  table cannot contain. In Alamofire, the private `PathMonitor.Result` enum
+  collected 141 `CALLS` edges and both `extension Result` blocks, which extend
+  the *standard library's* `Result`, and the inflated node ranked 4th in global
+  centrality while pushing one of its own enum cases to 6th. Types are now
+  keyed by qualified name, and lookups resolve outward through the enclosing
+  scopes as Swift does: a nested name still resolves from inside the type that
+  declares it, and from outside becomes an honest `sym:` stub.
+- **An enum's raw-value type is no longer recorded as a protocol
+  conformance.** `enum Sections: Int` writes its raw type in exactly the
+  position a superclass or first conformance occupies, so the resolver filed
+  `Sections CONFORMS Int` -- naming `Int` as a protocol. A literal-backed
+  standard-library type in first position on an enum is now read as a raw
+  value and emits no edge; a conformance after it is unaffected, so
+  `enum CodingKeys: String, CodingKey` keeps its `CodingKey` conformance.
+  This removed 12 false `CONFORMS` edges from the Alamofire graph.
+- **`swiftkg analyze` now sees the snapshots it was given.** The command never
+  constructed a `SnapshotManager`, so phase 13 reported `skipped (no snapshot
+  manager)` and the report rendered "No snapshots" even directly after
+  `swiftkg init` captured one. The MCP `analyze_repo` tool was already wired
+  correctly; only the CLI path was not.
+- **The Public API Surface section no longer claims to read an `export`
+  keyword.** Swift has none, and SwiftKG does not grep for one -- it reads the
+  access level already stored on every node. The TypeScript vocabulary had
+  followed the report template across; the phase's own docstring already
+  described the Swift behaviour correctly.
+- **`swiftkg analyze -o` announces the written report once**, not twice: both
+  the analyzer and the CLI were printing it.
+- **A library's public API is no longer reported as possible dead code.**
+  `_is_swift_entry_point` has always excluded `public` and `open` declarations,
+  whose callers are outside the repository by definition, but the orphan phase
+  built its node dict without `metadata` and never selected the column -- so
+  the visibility test read its `"internal"` default and the filter could not
+  fire. On Alamofire this reported 332 orphans led by `responseData`,
+  `responseDecodable` and `responseJSON`, the library's primary entry points;
+  it now reports 83. Visibility inherited from a `public extension` is honoured
+  too, since the extractor has already resolved it onto each member.
+- **The "semantic index is missing" guidance reappears in a degraded report.**
+  `_render_incomplete_analysis` decided whether to print it by matching
+  `"vec_nodes"` or `"no such table"` against the phase's error text -- what a
+  raw sqlite driver error happened to say. `kgmodule-utils` now raises a typed
+  `VectorStoreNotFoundError` whose message is *"Vector store not found: ...
+  Nothing has written it -- build the knowledge graph first"*, which contains
+  neither substring, so the guidance had gone silent: `swiftkg analyze` after
+  `swiftkg build-sqlite` reported that phase 4 failed without saying that
+  `swiftkg build-index` is the fix. The check is now `_is_missing_index`,
+  evaluated by exception type when the phase fails rather than by string at
+  render time. The substring test is kept as a fallback for a store whose file
+  exists but whose table does not -- a case the typed error, a
+  `FileNotFoundError` subclass, does not cover. The `kgmodule-utils` floor rises
+  to 0.21.0 with it, the release that introduced the typed error: against 0.20.x
+  the guidance would go missing exactly as before, which is not something a
+  caller could diagnose from the report.
+- **`type_hierarchy` and `explain_rank` no longer silently return nothing for a
+  quoted node ID.** Both reached `SwiftKG.node()`, which normalizes, but then
+  passed the *raw* argument to `store.edges_from()` — so an ID copied out of a
+  Markdown report with surrounding backticks resolved for the lookup and then
+  matched no edges. They normalize once, up front.
+- **`public_api` reports an out-of-range `limit` instead of silently
+  truncating.** It clamped with `max(1, min(int(limit), 1000))`, so a caller
+  asking for 5000 declarations received 1000 with nothing to indicate the
+  result was cut. Every bound on the MCP surface now rejects with a message
+  naming the accepted range, per FLEET_STANDARDS (settled 2026-08-24): a
+  truncated result that looks complete is worse than an error. Validation runs
+  before the graph is touched, and is reported as a tool result rather than
+  raised as a protocol error.
+- **Boundary validation reaches the tools that bypassed it.** `SwiftKG`'s
+  `query`/`pack`/`node`/`callers` overrides were already validated, but the
+  Swift-specific tools read the graph directly and so had no validated path —
+  the same gap the standard was written for. `render_explain` and
+  `compute_bridge_centrality` now validate internally, covering their CLI
+  callers at the same time, and `coderank`'s query entries bound `radius`,
+  which drives the induced-subgraph walk.
+- **Remaining TypeScriptKG leftovers in user-facing text**: six
+  `/path/to/ts-repo` examples in the `swiftkg` CLI module docstring and two in
+  the analysis module, plus "Exported public API surface" in its feature list.
+  Commit `069c01a` swept the CLI surface; a case-sensitive search missed
+  `Exported`.
+
 ### Planned
 
 - **Visualization surface.** `swiftkg viz` (Streamlit graph explorer),

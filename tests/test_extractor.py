@@ -208,7 +208,9 @@ class TestExtensions:
 
     def test_extension_points_at_the_extended_type(self, tmp_repo: Path) -> None:
         _, edges = _extract(tmp_repo)
-        extends = _rel(edges, "EXTENDS")
+        extends = [
+            e for e in _rel(edges, "EXTENDS") if e.source_id.rsplit(":", 1)[-1].startswith("Point")
+        ]
         assert extends
         assert all(e.target_id.endswith(":Point") for e in extends)
         assert all(e.target_id.startswith("struct:") for e in extends)
@@ -235,8 +237,10 @@ class TestExtensions:
         assert any(i.endswith(":Point+CustomStringConvertible") for i in ids)
 
     def test_every_extension_still_points_at_the_type(self, tmp_repo: Path) -> None:
+        """Both extensions on `Point` emit an edge; the second is not lost."""
         _, edges = _extract(tmp_repo)
-        assert len(_rel(edges, "EXTENDS")) == 2
+        to_point = [e for e in _rel(edges, "EXTENDS") if e.target_id.endswith(":Point")]
+        assert len(to_point) == 2
 
     def test_extension_members_are_qualified_under_the_type(self, tmp_repo: Path) -> None:
         nodes, _ = _extract(tmp_repo)
@@ -445,3 +449,76 @@ class TestExternalProtocolClassification:
     def test_a_later_known_protocol_is_still_conformance(self, tmp_repo: Path) -> None:
         _, edges = _extract(tmp_repo)
         assert ("GeometryModel", "Auditable") in _pairs(edges, "CONFORMS")
+
+
+# ---------------------------------------------------------------------------
+# Scoped name resolution
+# ---------------------------------------------------------------------------
+
+
+class TestNestedTypeScoping:
+    """A nested type must not capture same-named references from outside it.
+
+    Swift makes `PathMonitor.Result` invisible under its bare name outside
+    `PathMonitor`, so a repo-wide index keyed on bare names lets one uniquely
+    named nested type absorb every reference to the standard library's type of
+    that name.
+    """
+
+    def test_nested_type_is_keyed_by_its_qualified_name(self, tmp_repo: Path) -> None:
+        nodes, _ = _extract(tmp_repo)
+        assert any(n.qualname == "PathMonitor.Result" and n.kind == "enum" for n in nodes)
+
+    def test_file_scope_extension_does_not_attach_to_a_nested_type(self, tmp_repo: Path) -> None:
+        """`extension Result` extends the standard library's type, not the nested one."""
+        _, edges = _extract(tmp_repo)
+        assert ("Result", "Result") in _pairs(edges, "EXTENDS")
+        assert ("Result", "PathMonitor.Result") not in _pairs(edges, "EXTENDS")
+
+    def test_the_unresolved_target_is_an_honest_stub(self, tmp_repo: Path) -> None:
+        _, edges = _extract(tmp_repo)
+        extends = next(e for e in _rel(edges, "EXTENDS") if e.source_id.endswith(":Result"))
+        assert extends.target_id == "sym:Result"
+
+    def test_nothing_outside_the_declaring_type_references_it(self, tmp_repo: Path) -> None:
+        nested = "enum:Sources/SampleKit/Storage.swift:PathMonitor.Result"
+        _, edges = _extract(tmp_repo)
+        sources = {e.source_id for e in edges if e.target_id == nested}
+        assert all("PathMonitor" in src for src in sources)
+
+    def test_the_declaring_scope_still_resolves_the_bare_name(self, tmp_repo: Path) -> None:
+        """The fix must not cost recall inside the type that declares it.
+
+        `Config(timeout:)` inside `PathMonitor` is the bare name Swift resolves,
+        so it still has to reach `PathMonitor.Config`.
+        """
+        _, edges = _extract(tmp_repo)
+        assert ("PathMonitor.makeConfig", "PathMonitor.Config") in _pairs(edges, "CALLS")
+
+
+# ---------------------------------------------------------------------------
+# Enum raw values
+# ---------------------------------------------------------------------------
+
+
+class TestEnumRawValues:
+    """`enum Section: Int` writes a raw type where a conformance would go."""
+
+    def test_a_raw_value_type_is_not_a_conformance(self, tmp_repo: Path) -> None:
+        _, edges = _extract(tmp_repo)
+        assert ("Section", "Int") not in _pairs(edges, "CONFORMS")
+
+    def test_it_is_not_recorded_as_inheritance_either(self, tmp_repo: Path) -> None:
+        _, edges = _extract(tmp_repo)
+        assert ("Section", "Int") not in _pairs(edges, "INHERITS")
+
+    def test_a_conformance_after_the_raw_type_survives(self, tmp_repo: Path) -> None:
+        """`enum Label: String, Auditable` drops `String` and keeps `Auditable`."""
+        _, edges = _extract(tmp_repo)
+        assert ("Label", "String") not in _pairs(edges, "CONFORMS")
+        assert ("Label", "Auditable") in _pairs(edges, "CONFORMS")
+
+    def test_a_non_raw_first_specifier_is_still_a_conformance(self, tmp_repo: Path) -> None:
+        """Only literal-backed types are raw values; `enum StorageError: Error` is not."""
+        _, edges = _extract(tmp_repo)
+        assert ("StorageError", "Error") in _pairs(edges, "CONFORMS")

@@ -50,3 +50,6 @@ venv/
 
 # Cached embedding models
 .kgcache/
+
+# The built mkdocs site.
+/site

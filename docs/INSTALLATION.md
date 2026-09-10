@@ -53,8 +53,14 @@ Add `.swiftkg/` to the target repository's `.gitignore`, or keep
 git clone https://github.com/Flux-Frontiers/swift_kg
 cd swift_kg
 poetry install --with dev
-.venv/bin/pre-commit install
+pycodekg install-hooks --repo .
 ```
+
+Install the hook with `pycodekg install-hooks`, not `pre-commit install`. Both
+write `.git/hooks/pre-commit`, and the PyCodeKG hook already runs
+`pre-commit run` -- so it gives you the same checks plus an opt-in index
+rebuild, while `pre-commit install` would silently replace it and drop that
+path. `pycodekg init --repo .` installs it too.
 
 Extras are user-facing features; dev tooling is a Poetry group, so
 `pip install swift-kg[dev]` is deliberately not a thing.

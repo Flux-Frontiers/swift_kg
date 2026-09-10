@@ -10,8 +10,16 @@ MCP tools before reading files; SwiftKG cannot index itself. The SwiftKG
 toolkit below is the product surface, used on Swift repositories.
 
 ```bash
-# Index this repo with PyCodeKG (one-time setup; installs the pycodekg
-# pre-commit hook that rebuilds the index and snapshots on every commit)
+# Index this repo with PyCodeKG (one-time setup). This also installs the
+# pycodekg pre-commit hook, which runs the quality checks from
+# .pre-commit-config.yaml and nothing else by default: the index rebuild and
+# metrics snapshot are opt-in (PYCODEKG_SNAPSHOT=1) and run only on the
+# default branch. Snapshots have been off by default fleet-wide since
+# 2026-08-18 -- see kgrag_priv/docs/SNAPSHOT_STRATEGY.md.
+#
+# The hook owns .git/hooks/pre-commit, the same file `pre-commit install`
+# writes. It already delegates to pre-commit, so do not run `pre-commit
+# install` afterwards -- that would replace it and drop the rebuild path.
 pycodekg init --repo .
 ```
 

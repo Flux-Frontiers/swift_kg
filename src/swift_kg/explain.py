@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from swift_kg.validation import bounded_int, normalize_node_id
+
 _SWIFT_EXT_RE = re.compile(r"\.swift$")
 
 #: Members the runtime, the standard library or a UI framework calls rather
@@ -61,13 +63,21 @@ def render_explain(
                ``callers()``, ``stats()``, and ``_store.edges_from()``.
     :param node_id: Stable node identifier
                     (e.g. ``fn:Sources/SampleKit/Storage.swift:logAccess``).
-    :param limit: Maximum callers and callees to list.  Pass 0 to list all.
+    :param limit: Maximum callers and callees to list (0-1000).  Pass 0 to
+                  list all.
     :param snippets_hint: Closing call-to-action shown to the consumer for
                           retrieving the full source — ``"pack_snippets()"``
                           for MCP, ``"swiftkg pack"`` for CLI.
     :return: Markdown string, or a "Node Not Found" header when the ID does
              not exist in the knowledge graph.
+    :raises ValueError: If ``node_id`` is unusable or ``limit`` is out of range.
     """
+    # Validated here, not in each caller: `swiftkg explain` and the MCP
+    # `explain` tool both funnel through this function, so one set of checks
+    # covers both surfaces (FLEET_STANDARDS, settled 2026-08-24).
+    node_id = normalize_node_id(node_id)
+    limit = bounded_int("limit", limit, 0, 1000)
+
     node = kg.node(node_id)
     if node is None:
         return f"# Node Not Found\n\nNode ID `{node_id}` does not exist in the knowledge graph."

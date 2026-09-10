@@ -9,7 +9,7 @@ using SwiftKG's graph traversal capabilities. Analyzes:
 - Dependency analysis (orphaned declarations, tight coupling)
 - doc-comment coverage (determines semantic retrieval quality)
 - Type hierarchy: inheritance, protocol conformance, and extensions
-- Exported public API surface
+- Public API surface (`public` / `open` access levels)
 
 Operational behaviour:
 - Entry point defaults: resolves ``repo_root`` and defaults ``db_path``/``vectors_path``
@@ -19,20 +19,21 @@ Operational behaviour:
 
 Usage (Python API):
     from swift_kg import SwiftKG
-    from swift_kg.analysis import SwiftKGAnalyzer
+    from swift_kg.swiftkg_thorough_analysis import SwiftKGAnalyzer
 
-    kg = SwiftKG("/path/to/ts-repo")
+    kg = SwiftKG("/path/to/swift-repo")
     kg.build()
     analyzer = SwiftKGAnalyzer(kg)
     results = analyzer.run_analysis(report_path="analysis.md")
 
 Usage (CLI):
-    swiftkg analyze /path/to/ts-repo [--report analysis.md]
+    swiftkg analyze /path/to/swift-repo [--report analysis.md]
 """
 
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 import platform
@@ -43,6 +44,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from kg_utils.vector_backend import VectorStoreNotFoundError
 from rich.console import Console
 
 logging.basicConfig(level=logging.INFO)
@@ -255,7 +257,14 @@ class SwiftKGAnalyzer:
             fn()
         except Exception as exc:  # noqa: BLE001 -- see docstring
             elapsed = time.monotonic() - t0
-            self.phase_failures.append({"phase": num, "name": name, "error": str(exc)})
+            self.phase_failures.append(
+                {
+                    "phase": num,
+                    "name": name,
+                    "error": str(exc),
+                    "missing_index": self._is_missing_index(exc),
+                }
+            )
             logger.warning("Phase %d (%s) failed: %s", num, name, exc)
             self.console.print(
                 f"  [cyan]▶ Phase {num:2d}/{self._TOTAL_PHASES}:[/cyan]"
@@ -268,6 +277,26 @@ class SwiftKGAnalyzer:
             f"  [cyan]▶ Phase {num:2d}/{self._TOTAL_PHASES}:[/cyan]"
             f" {name}{result}  [green]({elapsed:.1f}s)[/green]"
         )
+
+    @staticmethod
+    def _is_missing_index(exc: BaseException) -> bool:
+        """Return ``True`` if *exc* means the semantic index was never built.
+
+        Recognised by type rather than by message. This used to match on the
+        substrings ``vec_nodes`` and ``no such table``, which is what a raw
+        sqlite driver error happened to say -- so the guidance below went
+        missing the moment kgmodule-utils improved that message, and the
+        report degraded silently into saying a phase failed without saying
+        the fix. The substring check is kept only for a store built before
+        the typed error existed, which still fails on the missing table.
+
+        :param exc: The exception a phase raised.
+        :return: ``True`` if the fan-out phase failed for want of an index.
+        """
+        if isinstance(exc, VectorStoreNotFoundError):
+            return True
+        text = str(exc)
+        return "vec_nodes" in text or "no such table" in text
 
     # ------------------------------------------------------------------
     # Public entrypoint
@@ -290,7 +319,7 @@ class SwiftKGAnalyzer:
         6.  Pattern detection
         7.  Module coupling (IMPORTS + cross-module CALLS)
         8.  Critical call chains
-        9.  Public API surface (exported declarations)
+        9.  Public API surface (`public` / `open` declarations)
         10. doc-comment coverage
         11. Type hierarchy (INHERITS + CONFORMS + EXTENDS)
         12. Generate insights and recommendations
@@ -581,7 +610,8 @@ class SwiftKGAnalyzer:
             con = self.kg.store.con
             rows = con.execute(
                 """
-                SELECT id, name, kind, module_path, docstring, lineno, end_lineno
+                SELECT id, name, kind, module_path, docstring, lineno, end_lineno,
+                       json_extract(metadata, '$.visibility') AS visibility
                 FROM nodes
                 WHERE kind IN ('function', 'method')
                   AND id NOT LIKE 'sym:%'
@@ -589,7 +619,16 @@ class SwiftKGAnalyzer:
                 """
             ).fetchall()
 
-            for node_id, name, kind, module_path, docstring, lineno, end_lineno in rows:
+            for (
+                node_id,
+                name,
+                kind,
+                module_path,
+                docstring,
+                lineno,
+                end_lineno,
+                visibility,
+            ) in rows:
                 try:
                     callers = self.kg.callers(node_id, rel="CALLS")
                     if callers:
@@ -599,6 +638,11 @@ class SwiftKGAnalyzer:
                         "name": name,
                         "kind": kind,
                         "module_path": module_path,
+                        # Without this the visibility test in
+                        # _is_swift_entry_point always reads its "internal"
+                        # default, and a library's whole public API is filed as
+                        # possible dead code.
+                        "metadata": {"visibility": visibility or "internal"},
                     }
                     if self._is_swift_entry_point(node):
                         continue
@@ -1232,7 +1276,7 @@ class SwiftKGAnalyzer:
             undocumented = cov.get("total", 0) - cov.get("with_doc", 0)
             immediate.append(
                 f"**Improve doc-comment coverage** — {undocumented} declarations lack doc-comment; "
-                "prioritize high fan-in functions and exported API surface first"
+                "prioritize high fan-in methods and the public API surface first"
             )
 
         if self.orphaned_functions:
@@ -1271,7 +1315,7 @@ class SwiftKGAnalyzer:
             if tightly_coupled:
                 medium.append(
                     "**Reduce module coupling** — introduce protocol boundaries or facade "
-                    "exports to decouple tightly coupled modules"
+                    "types to decouple tightly coupled modules"
                 )
 
         if self.critical_paths:
@@ -1289,8 +1333,8 @@ class SwiftKGAnalyzer:
 
         if self.public_apis:
             long_term.append(
-                "**Stabilize the exported API** — document breaking-change policies "
-                f"for exported symbols: {', '.join(f'`{a.name}`' for a in self.public_apis[:3])}"
+                "**Stabilize the public API** — document breaking-change policies for "
+                f"`public` symbols: {', '.join(f'`{a.name}`' for a in self.public_apis[:3])}"
             )
 
         long_term.append(
@@ -1538,14 +1582,18 @@ Cohesion = incoming-callers / (incoming + outgoing + 1). Higher = more internall
         else:
             report += "No deep call chains detected.\n\n"
 
-        report += "---\n\n## Public API Surface\n\nExported declarations (top-level `export` keyword).\n\n"
+        report += (
+            "---\n\n## Public API Surface\n\n"
+            "Declarations whose access level is `public` or `open`, read from the "
+            "keyword on each declaration.\n\n"
+        )
         if self.public_apis:
             report += "| Name | Kind | Module | Callers |\n|---|---|---|---|\n"
             for api in sorted(self.public_apis, key=lambda a: a.fan_in, reverse=True)[:12]:
                 report += f"| `{api.name}` | {api.kind} | {api.module} | {api.fan_in} |\n"
             report += "\n"
         else:
-            report += "No exported declarations identified.\n\n"
+            report += "No `public` or `open` declarations identified.\n\n"
 
         # doc-comment Coverage
         cov = self.doc_comment_coverage
@@ -1576,7 +1624,7 @@ Cohesion = incoming-callers / (incoming + outgoing + 1). Higher = more internall
                 undocumented = cov["total"] - cov["with_doc"]
                 report += (
                     f"> **Recommendation:** {undocumented} declarations lack doc-comment. "
-                    "Prioritize exported functions and high fan-in methods first.\n\n"
+                    "Prioritize the public API surface and high fan-in methods first.\n\n"
                 )
         else:
             report += "---\n\n## doc-comment Coverage\n\nCoverage data not available.\n\n"
@@ -1735,9 +1783,7 @@ Cohesion = incoming-callers / (incoming + outgoing + 1). Higher = more internall
         for failure in self.phase_failures:
             lines.append(f"| {failure['phase']} | {failure['name']} | `{failure['error']}` |")
 
-        if any(
-            "vec_nodes" in f["error"] or "no such table" in f["error"] for f in self.phase_failures
-        ):
+        if any(f.get("missing_index") for f in self.phase_failures):
             lines.append(
                 "\n> The semantic index is missing. Only the fan-out phase needs it; "
                 "every other phase reads the SQLite graph directly, which is why the "
@@ -1755,9 +1801,18 @@ Cohesion = incoming-callers / (incoming + outgoing + 1). Higher = more internall
             for k, v in self.module_metrics.items()
             if v.total_fan_in > 0 or len(v.outgoing_deps) > 0
         }
+        quality_score, quality_grade, quality_label = self._compute_quality_grade()
         return {
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "statistics": self.stats,
+            # The headline number the report leads with; without it a JSON
+            # consumer has to recompute the grade to learn it. PyCodeKG also
+            # carries a per-component breakdown, which SwiftKG does not track.
+            "quality": {
+                "score": quality_score,
+                "grade": quality_grade,
+                "label": quality_label,
+            },
             "doc_comment_coverage": self.doc_comment_coverage,
             "function_metrics": {k: asdict(v) for k, v in sorted_fn},
             "module_metrics": {k: asdict(v) for k, v in active_modules.items()},
@@ -1887,7 +1942,7 @@ Cohesion = incoming-callers / (incoming + outgoing + 1). Higher = more internall
             for api in sorted(self.public_apis, key=lambda a: a.fan_in, reverse=True)[:12]:
                 out.append(f"| `{api.name}` | {api.kind} | {api.module} | {api.fan_in} |")
         else:
-            out.append("No exported declarations identified.\n")
+            out.append("No `public` or `open` declarations identified.\n")
         out.append("")
 
         out.append("## doc-comment Coverage\n")
@@ -1941,3 +1996,105 @@ Cohesion = incoming-callers / (incoming + outgoing + 1). Higher = more internall
         out.append("")
 
         return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main(
+    repo_root: str = ".",
+    db_path: str | None = None,
+    vectors_path: str | None = None,
+    report_path: str | None = None,
+    json_path: str | None = None,
+    quiet: bool = False,
+    include: set[str] | None = None,
+    exclude: set[str] | None = None,
+    persist_centrality: bool = False,
+) -> dict:
+    """Run the full analysis, mirroring ``pycodekg_thorough_analysis.main``.
+
+    The single entry point behind ``swiftkg analyze``, the ``__main__`` guard
+    below, and any programmatic caller, so all three behave identically.
+
+    Unlike the PyCodeKG original this returns the compiled results rather than
+    ``None``: ``run_analysis`` already builds the dict, and a standalone caller
+    would otherwise have to re-run the analysis to see it. An empty dict means
+    the graph was missing, which is how the CLI knows to exit non-zero.
+
+    :param repo_root: Repository root to analyze.
+    :param db_path: SQLite graph path; defaults to ``<repo>/.swiftkg/graph.sqlite``.
+    :param vectors_path: sqlite-vec store path; defaults to
+        ``<repo>/.swiftkg/vectors.sqlite``.
+    :param report_path: Markdown report path.  When ``None`` the report is
+        printed to stdout instead, which is ``swiftkg analyze``'s documented
+        behaviour and differs from PyCodeKG's auto-named file.
+    :param json_path: JSON results path.  When ``None`` no JSON is written.
+    :param quiet: Suppress per-phase console progress.
+    :param include: Top-level directory names the graph covers, recorded in the
+        report metadata.
+    :param exclude: Directory names excluded from the graph, likewise recorded.
+    :param persist_centrality: Persist SIR scores to ``centrality_scores``.
+    :return: The compiled results, or ``{}`` when the graph does not exist.
+    """
+    # Lazy, like every other cross-module import here: swift_kg.kg imports the
+    # analyzer, so a module-level import back into it would be circular.
+    from swift_kg.kg import SwiftKG  # noqa: PLC0415
+    from swift_kg.snapshots import SnapshotManager  # noqa: PLC0415
+
+    console = Console(quiet=quiet)
+    root = Path(repo_root).resolve()
+    db = Path(db_path) if db_path else root / ".swiftkg" / "graph.sqlite"
+    vectors = Path(vectors_path) if vectors_path else root / ".swiftkg" / "vectors.sqlite"
+
+    if not db.exists():
+        # Reported rather than raised: a traceback here says nothing the user
+        # can act on, and the fix is one command.
+        Console().print(
+            f"[red]Error:[/red] No knowledge graph at [dim]{db}[/dim]\n"
+            "Run [bold]swiftkg build --repo .[/bold] first, then re-run analyze."
+        )
+        return {}
+
+    kg = SwiftKG(
+        repo_root=root,
+        db_path=db,
+        vectors_path=vectors,
+        include=include or set(),
+        exclude=exclude or set(),
+    )
+
+    snapshots_dir = root / ".swiftkg" / "snapshots"
+    snap_mgr = SnapshotManager(snapshots_dir) if snapshots_dir.exists() else None
+
+    try:
+        analyzer = SwiftKGAnalyzer(
+            kg,
+            console=console,
+            snapshot_mgr=snap_mgr,
+            include_dirs=include or set(),
+            exclude_dirs=exclude or set(),
+        )
+        results = analyzer.run_analysis(
+            report_path=report_path,
+            persist_centrality=persist_centrality,
+        )
+
+        if json_path:
+            out = Path(json_path)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(results, indent=2, default=str))
+            console.print(f"[dim]JSON   : {out}[/dim]")
+
+        if not report_path:
+            Console(quiet=quiet).print(analyzer.to_markdown())
+
+        return results
+    finally:
+        kg.close()
+
+
+if __name__ == "__main__":
+    main()

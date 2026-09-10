@@ -82,13 +82,13 @@ Each command is available as `swiftkg <subcommand>` **or** a dedicated `swiftkg-
 | Subcommand / Script alias | Purpose |
 |---|---|
 | `init` / `swiftkg-init` | One-command setup: model, build, hooks, snapshot |
-| `build` / `swiftkg-build` | Full rebuild — wipes, then SQLite graph + sqlite-vec index (`--graph-only`, `--index-only`) |
+| `build` / `swiftkg-build` | Full rebuild — wipes, then SQLite graph + sqlite-vec index (`--graph-only`, `--index-only`, `--include-dir`/`--exclude-dir`) |
 | `update` / `swiftkg-update` | Incremental upsert; same options as `build`, no wipe |
 | `build-sqlite` / `swiftkg-build-sqlite` | Graph stage only (`--wipe` to clear first) |
 | `build-index` / `swiftkg-build-index` | Vector-index stage only; graph must exist (`--wipe` to clear first) |
 | `query` / `swiftkg-query` | Hybrid semantic + structural query (`-k`, `--hop`, `--max-nodes`, `--rerank` hybrid/semantic/legacy) |
 | `pack` / `swiftkg-pack` | Source-grounded snippet packs (`--max-lines`, `--out` file.md/.json) |
-| `analyze` / `swiftkg-analyze` | Thorough 14-phase architectural analysis (`-o report.md`, `--write-centrality`) |
+| `analyze` / `swiftkg-analyze` | Thorough 14-phase architectural analysis (`-o report.md`, `-j results.json`, `-q`, `--write-centrality`, `--include-dir`/`--exclude-dir`) |
 | `centrality` / `swiftkg-centrality` | SIR PageRank — rank nodes or modules by structural importance |
 | `bridges` | Module connectivity ranking — orchestrator/hub modules |
 | `framework-nodes` | Framework-like hubs: high SIR + high connectivity |

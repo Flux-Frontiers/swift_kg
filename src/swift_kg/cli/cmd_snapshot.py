@@ -152,7 +152,7 @@ def capture_snapshot(
         # capturable when the semantic index or kg extras are unavailable
         # (e.g. from the pre-commit hook on a graph-only build).
         try:
-            from swift_kg.analysis import (  # pylint: disable=import-outside-toplevel
+            from swift_kg.swiftkg_thorough_analysis import (  # pylint: disable=import-outside-toplevel
                 SwiftKGAnalyzer,
             )
 

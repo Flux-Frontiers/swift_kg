@@ -3,14 +3,14 @@ cli/main.py — SwiftKG CLI entry point.
 
 Usage::
 
-    swiftkg init --repo /path/to/ts-repo
-    swiftkg build --repo /path/to/ts-repo
+    swiftkg init --repo /path/to/swift-repo
+    swiftkg build --repo /path/to/swift-repo
     swiftkg query "networking layer"
     swiftkg pack "error handling" --hop 2
-    swiftkg analyze /path/to/ts-repo
-    swiftkg snapshot save --repo /path/to/ts-repo
-    swiftkg install-hooks --repo /path/to/ts-repo
-    swiftkg mcp --repo /path/to/ts-repo
+    swiftkg analyze /path/to/swift-repo
+    swiftkg snapshot save --repo /path/to/swift-repo
+    swiftkg install-hooks --repo /path/to/swift-repo
+    swiftkg mcp --repo /path/to/swift-repo
 """
 
 from __future__ import annotations

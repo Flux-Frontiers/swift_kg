@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from swift_kg.analysis import SwiftKGAnalyzer
 from swift_kg.extractor import _HAS_TREE_SITTER
 from swift_kg.kg import SwiftKG
+from swift_kg.swiftkg_thorough_analysis import SwiftKGAnalyzer
 
 pytestmark = pytest.mark.skipif(not _HAS_TREE_SITTER, reason="tree-sitter-swift not installed")
 
@@ -117,6 +117,33 @@ class TestOrphanPhase:
         orphan_names = {o.name for o in analyzer.orphaned_functions}
         assert not ({"init", "deinit", "body", "description"} & orphan_names)
 
+    def test_a_public_declaration_is_not_an_orphan(self, analyzer: SwiftKGAnalyzer) -> None:
+        """A library's callers are outside the repository being indexed.
+
+        `_is_swift_entry_point` has always tested visibility, but the phase
+        built its node dict without metadata, so the test read its "internal"
+        default and filed the entire public API as possible dead code.
+        """
+        orphan_names = {o.name for o in analyzer.orphaned_functions}
+        assert not ({"audit", "distance", "increment", "measure", "scaled"} & orphan_names)
+
+    def test_visibility_inherited_from_a_public_extension_is_honoured(
+        self, analyzer: SwiftKGAnalyzer
+    ) -> None:
+        """`inverted()` declares no access level; its `public extension` confers one."""
+        assert "inverted" not in {o.name for o in analyzer.orphaned_functions}
+
+    def test_an_uncalled_internal_declaration_is_still_an_orphan(
+        self, analyzer: SwiftKGAnalyzer
+    ) -> None:
+        """The filter must not swallow the dead code the phase exists to find."""
+        assert "debugDump" in {o.name for o in analyzer.orphaned_functions}
+
+    def test_a_called_internal_declaration_is_not_an_orphan(
+        self, analyzer: SwiftKGAnalyzer
+    ) -> None:
+        assert "logAccess" not in {o.name for o in analyzer.orphaned_functions}
+
 
 class TestReportVocabulary:
     def test_no_typescript_relations_leak_into_the_report(self, analyzer: SwiftKGAnalyzer) -> None:
@@ -131,9 +158,105 @@ class TestReportVocabulary:
         for label in ("Structs", "Protocols", "Actors", "Extensions"):
             assert label in report
 
+    def test_the_public_api_section_does_not_claim_an_export_keyword(
+        self, analyzer: SwiftKGAnalyzer
+    ) -> None:
+        """Swift has no `export`; the surface is read from access levels.
+
+        The sibling modules greps for `export`, and that vocabulary followed the
+        report template over into SwiftKG.
+        """
+        assert "export" not in analyzer.to_markdown().lower()
+
+    def test_the_written_report_names_the_swift_keywords(
+        self, analyzer: SwiftKGAnalyzer, tmp_path: Path
+    ) -> None:
+        """The full report describes the surface; `to_markdown` only tabulates it."""
+        out = tmp_path / "report.md"
+        analyzer._write_report(str(out))
+        report = out.read_text()
+        assert "## Public API Surface" in report
+        assert "`public` or `open`" in report
+        assert "export" not in report.lower()
+
 
 class TestCompiledResults:
     def test_results_are_serialisable(self, analyzer: SwiftKGAnalyzer) -> None:
         import json
 
         json.dumps(analyzer._compile_results())
+
+
+class TestMainEntryPoint:
+    """`main()` is the single entry behind the CLI, the `__main__` guard and
+    any programmatic caller, mirroring `pycodekg_thorough_analysis.main`."""
+
+    def test_it_takes_pycodekgs_parameter_set(self) -> None:
+        import inspect
+
+        from swift_kg.swiftkg_thorough_analysis import main
+
+        assert list(inspect.signature(main).parameters) == [
+            "repo_root",
+            "db_path",
+            "vectors_path",
+            "report_path",
+            "json_path",
+            "quiet",
+            "include",
+            "exclude",
+            "persist_centrality",
+        ]
+
+    def test_a_missing_graph_returns_empty_rather_than_raising(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        """A traceback here says nothing actionable; the fix is one command."""
+        from swift_kg.swiftkg_thorough_analysis import main
+
+        assert main(repo_root=str(tmp_path)) == {}
+        assert "swiftkg build" in capsys.readouterr().out
+
+    def test_it_returns_the_compiled_results(self, tmp_repo: Path) -> None:
+        from swift_kg.kg import SwiftKG
+        from swift_kg.swiftkg_thorough_analysis import main
+
+        kg = SwiftKG(repo_root=tmp_repo)
+        kg.build_graph(wipe=True)
+        kg.close()
+
+        results = main(repo_root=str(tmp_repo), quiet=True, report_path=str(tmp_repo / "r.md"))
+        assert results["statistics"]
+        assert results["quality"]["grade"]
+
+    def test_json_output_carries_the_quality_grade(self, tmp_repo: Path) -> None:
+        """The report's headline number, so a JSON consumer need not recompute it."""
+        import json
+
+        from swift_kg.kg import SwiftKG
+        from swift_kg.swiftkg_thorough_analysis import main
+
+        kg = SwiftKG(repo_root=tmp_repo)
+        kg.build_graph(wipe=True)
+        kg.close()
+
+        out = tmp_repo / "results.json"
+        main(
+            repo_root=str(tmp_repo),
+            quiet=True,
+            report_path=str(tmp_repo / "r.md"),
+            json_path=str(out),
+        )
+        quality = json.loads(out.read_text())["quality"]
+        assert set(quality) == {"score", "grade", "label"}
+
+    def test_no_json_is_written_without_a_path(self, tmp_repo: Path) -> None:
+        from swift_kg.kg import SwiftKG
+        from swift_kg.swiftkg_thorough_analysis import main
+
+        kg = SwiftKG(repo_root=tmp_repo)
+        kg.build_graph(wipe=True)
+        kg.close()
+
+        main(repo_root=str(tmp_repo), quiet=True, report_path=str(tmp_repo / "r.md"))
+        assert not list(tmp_repo.glob("*.json"))

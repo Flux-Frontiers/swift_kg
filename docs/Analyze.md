@@ -4,7 +4,30 @@
 swiftkg analyze REPO                          # print to stdout
 swiftkg analyze REPO -o report.md             # write a file
 swiftkg analyze REPO --write-centrality       # persist SIR scores to SQLite
+swiftkg analyze REPO --include-dir Source     # scope the report's metadata
+swiftkg analyze REPO -j results.json          # machine-readable results
+swiftkg analyze REPO -o report.md --quiet     # no per-phase progress
 ```
+
+`main()` in `swift_kg/swiftkg_thorough_analysis.py` is the single entry point
+behind the CLI, the module's `__main__` guard and any programmatic caller, so
+all three behave identically:
+
+```bash
+python src/swift_kg/swiftkg_thorough_analysis.py   # analyzes the cwd
+```
+
+The JSON written by `-j` carries the same results the report renders, including
+the headline `quality` block (`score`, `grade`, `label`). Omit the flag and no
+JSON is written. A missing graph is reported with the command that fixes it and
+exits non-zero rather than producing a misleading partial report.
+
+Scope the graph at build time, not here: `--include-dir` / `--exclude-dir`
+describe what was indexed, so the report header states it accurately, but the
+numbers come from whatever the graph holds. Indexing `Tests/` alongside
+`Source/` drags doc-comment coverage down and puts test-support files at the
+top of every ranking, so build with `swiftkg build --include-dir Source` first
+and pass the same flags here.
 
 Fourteen phases over the SQLite graph. Thirteen are pure SQL; only fan-out
 seeds on a semantic query, so a graph built with `build-sqlite` still produces

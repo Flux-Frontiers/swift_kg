@@ -117,3 +117,68 @@ class TestLifespan:
     def test_a_lifespan_hook_is_wired(self, server) -> None:
         """FLEET_STANDARDS: close the SQLite handle on shutdown, not at exit."""
         assert server.mcp.settings.lifespan is not None
+
+
+class TestBoundaryValidation:
+    """Per FLEET_STANDARDS (settled 2026-08-24), the MCP surface is reachable
+    over SSE beyond a trusted local environment, so its arguments are real
+    external inputs.
+
+    The tools that route through ``SwiftKG.query``/``pack``/``node``/``callers``
+    are validated by those overrides. These cover the Swift-specific tools that
+    read the graph directly and so had no validated path.
+    """
+
+    def _call(self, server, tool: str, args: dict) -> str:
+        return asyncio.run(server.mcp.call_tool(tool, args))[0][0].text
+
+    @pytest.mark.parametrize(
+        ("tool", "kwargs"),
+        [
+            ("public_api", {"limit": 10_000}),
+            ("list_nodes", {"limit": 10_000}),
+            ("find_node", {"name": "x", "limit": 10_000}),
+            ("centrality", {"top": 10_000}),
+            ("framework_nodes", {"top": 10_000}),
+            ("rank_nodes", {"top": 10_000}),
+            ("find_definition_at", {"file": "a.swift", "line": 0}),
+            ("snapshot_list", {"limit": 10_000}),
+        ],
+    )
+    def test_an_out_of_range_argument_is_reported_not_clamped(
+        self, server, tool: str, kwargs: dict
+    ) -> None:
+        """A truncated result that looks complete is worse than an error."""
+        out = self._call(server, tool, kwargs)
+        assert "must be between" in out, out
+
+    @pytest.mark.parametrize("tool", ["type_hierarchy", "explain", "explain_rank"])
+    def test_an_empty_node_id_is_rejected(self, server, tool: str) -> None:
+        out = self._call(server, tool, {"node_id": "  "})
+        assert "node_id" in out and "empty" in out
+
+    def test_find_node_rejects_an_empty_name(self, server) -> None:
+        """A bare name would become `LIKE '%%'` and match the whole graph."""
+        out = self._call(server, "find_node", {"name": "   "})
+        assert "empty" in out
+
+    def test_validation_failures_do_not_raise_out_of_the_tool(self, server) -> None:
+        """An MCP tool reports a bad argument; it does not fail the protocol."""
+        out = self._call(server, "public_api", {"limit": -5})
+        assert "Invalid" in out or "error" in out
+
+    def test_the_instructions_state_the_bounds(self, server) -> None:
+        """An agent should not have to discover the ranges by trial and error."""
+        instructions = server.mcp.instructions or ""
+        assert "Argument bounds" in instructions
+        for bound in ("`k` 1-100", "`hop` 0-5", "`top` 1-1000"):
+            assert bound in instructions
+
+    def test_the_instructions_list_every_tools_parameters(self, server) -> None:
+        """The repo rule: signatures and the instructions block stay aligned."""
+        import inspect
+
+        instructions = server.mcp.instructions or ""
+        for name in ("list_nodes", "find_node", "public_api"):
+            for param in inspect.signature(getattr(server, name)).parameters:
+                assert param in instructions, f"{name}({param}) missing from instructions"
