@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`symbol` stub nodes, and the resolution pass that needs them.** The
+  extractor emitted edges pointing at `sym:<name>` IDs but never emitted a node
+  for them, so on Alamofire 1415 edges pointed at 392 IDs no row defined:
+  `get_node` returned nothing for them, `explain` had nothing to explain, and
+  every consumer had to special-case the hole. `SwiftCodeExtractor.extract` now
+  emits one deduplicated `symbol` node per distinct stub, repo-wide rather than
+  per file, recording in `metadata.referenced_by` which relations reached it.
+  The scaffolding for these was already in place and unused: `node_kinds()`
+  already declared `symbol` and `meaningful_node_kinds()` already excluded it
+  from vector indexing and doc-comment coverage, so neither metric moves.
+- **`swift_kg.resolution`, and a `_post_build_hook` on `SwiftKG` that runs it.**
+  `SwiftKG` subclassed `kg_utils.pipeline.KGModule` directly and never
+  overrode the hook, so no resolution ran and the graph carried no
+  `RESOLVES_TO` edges at all -- while `centrality._load_effective_edges`
+  rewrites `sym:` targets through exactly those edges, `coderank` weights
+  `RESOLVES_TO` at 0.30, and `callers()` documents itself as resolving through
+  stubs. All three were silently working on an edge type that was never
+  written. PyCodeKG puts the same hook on an intermediate `module/base.py`
+  class because it has several KG classes; SwiftKG has one, so the override
+  lives directly on it.
 - **A mkdocs-material documentation site**, matching `gutenberg_kg` and
   `quiltwright`: `mkdocs.yml`, `docs/index.md`, twelve `docs/api/*.md`
   mkdocstrings stubs, a `docs` Poetry group (`mkdocs-material`,
@@ -57,6 +77,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Ambiguous symbol resolutions are dropped rather than kept at low
+  confidence**, diverging from PyCodeKG. `GraphStore.resolve_symbols` writes a
+  `RESOLVES_TO` edge to *every* candidate when a bare name matches more than
+  one definition, which Python tolerates and Swift does not: Swift member names
+  are short and overloaded across unrelated types, so on Alamofire `sym:init`
+  matches 96 definitions, `sym:request` 30 and `sym:encode` 19. Of the 867
+  edges raw resolution produces there, 737 -- 85% -- are ambiguous, and every
+  consumer of `RESOLVES_TO` fans out through all of them. Swift is statically
+  typed, so a name matching several declarations with no receiver type is not a
+  weak signal worth keeping; it is an unresolvable reference. Two narrower
+  prunes run alongside it: `sym:append` and the rest of
+  `SWIFT_STDLIB_MEMBER_NAMES` are library members rather than the repository's
+  own (the analogue of PyCodeKG's builtin-method prune), and `extension Array`
+  is the only node named `Array`, so resolving `sym:Array` would link that
+  extension to itself. 103 resolutions survive on Alamofire, 20 on
+  ml-stable-diffusion.
+- **Existing snapshots will read as `behind` after the next rebuild.**
+  `total_nodes` now counts stub nodes -- 584 more on Alamofire, 160 on
+  ml-stable-diffusion -- which is well past the 50-node freshness tolerance in
+  `_freshness`. The graph genuinely has more nodes; re-save the snapshot.
 - **`analysis.py` is now `swiftkg_thorough_analysis.py`**, matching
   `pycode_kg`'s module name. This is a deliberate divergence from `tscode_kg`,
   which calls its equivalent `analysis.py` as SwiftKG did: the fleet-parity
@@ -79,6 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A call to a closure parameter emitted a stub for it.** `handlers.forEach {
+  $0() }` recorded a CALLS edge to `sym:$0`, which names no declaration in the
+  repository or out of it. Seven such edges on Alamofire.
 - **A nested type no longer captures same-named references repository-wide.**
   The symbol table keyed every declared type by its bare name, so a nested
   type with a repo-unique bare name absorbed every reference to that name --

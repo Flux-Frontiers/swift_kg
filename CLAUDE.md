@@ -143,6 +143,7 @@ The divergences that already exist, and why:
 | Visibility stored on every node | Swift states access level with a keyword; it is a fact, not a naming convention |
 | Bridge centrality counts `CONFORMS`/`EXTENDS` | A Swift `import` names a module, not a file, so `IMPORTS` edges carry no file coupling |
 | Public-API analysis is SQL, not a source grep | Access levels are already in the graph |
+| Ambiguous symbol resolutions are dropped, not kept at low confidence | Swift member names are short and overloaded across unrelated types, so a bare-name match is usually unresolvable rather than uncertain: `sym:init` matches 96 definitions in Alamofire, and 85% of raw resolutions there are ambiguous. See `swift_kg.resolution` |
 
 ### Swift grammar
 

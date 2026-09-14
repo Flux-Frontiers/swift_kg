@@ -19,7 +19,7 @@ try:
     from kg_utils.pipeline import KGModule
     from kg_utils.semantic import DEFAULT_MODEL
     from kg_utils.specs import BuildStats, QueryResult, SnippetPack
-    from kg_utils.store import DEFAULT_RELS, GraphStore  # noqa: F401
+    from kg_utils.store import DEFAULT_RELS, GraphStore  # noqa: F401  (DEFAULT_RELS re-exported)
 except ImportError as _e:
     raise ImportError(
         "SwiftKG requires kgmodule-utils[semantic] for its graph infrastructure.\n"
@@ -29,6 +29,7 @@ except ImportError as _e:
 
 from swift_kg.config import load_exclude_dirs, load_include_dirs
 from swift_kg.extractor import SwiftCodeExtractor
+from swift_kg.resolution import resolve_symbols_pruned
 from swift_kg.validation import bounded_int, normalize_node_id, require_query
 
 __all__ = [
@@ -126,6 +127,20 @@ class SwiftKG(KGModule):
 
     def kind(self) -> str:
         return "code"
+
+    def _post_build_hook(self, store: GraphStore) -> None:
+        """Resolve ``sym:`` stubs, then prune what Swift cannot support.
+
+        The extractor's two-pass resolver already pins down every reference it
+        can see, refusing to guess between candidates. What reaches here is
+        what it could not: mostly framework names with no first-party
+        declaration, plus calls through a receiver whose type is unknown. See
+        :mod:`swift_kg.resolution` for why the generic resolution is pruned
+        harder here than in PyCodeKG.
+
+        :param store: The graph store just written by ``build_graph``.
+        """
+        resolve_symbols_pruned(store)
 
     def analyze(self) -> str:
         """Run thorough structural analysis and return a Markdown report.

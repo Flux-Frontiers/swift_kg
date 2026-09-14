@@ -1424,6 +1424,11 @@ class _FileWalker:
                 receiver, callee, enclosing_type, enclosing_super, scope
             )
             if target_id is None:
+                if callee.startswith("$"):
+                    # `$0(...)` invokes a closure parameter. It names no
+                    # declaration anywhere in the repository or out of it, so a
+                    # stub would stand for nothing.
+                    continue
                 target_id = f"sym:{callee}"
             if target_id == source_id or target_id in seen:
                 continue
@@ -1442,6 +1447,39 @@ class _FileWalker:
                 if callee:
                     yield receiver, callee
             yield from self._collect_calls(child, depth + 1)
+
+
+# ---------------------------------------------------------------------------
+# Symbol stubs
+# ---------------------------------------------------------------------------
+
+
+def _stub_nodes(stub_relations: dict[str, set[str]]) -> Iterator[NodeSpec]:
+    """Emit one ``symbol`` node per distinct ``sym:`` target an edge points at.
+
+    Emitted once for the whole repository rather than once per file, because a
+    stub is one node standing for one unresolved name and the same name is
+    referenced from many files.
+
+    Without these the graph carries edges whose target no row defines, and
+    ``GraphStore.resolve_symbols`` -- which reads ``kind = 'symbol'`` rows -- has
+    nothing to match first-party definitions against.
+
+    :param stub_relations: Stub node ID mapped to the relations referencing it.
+    :return: One :class:`NodeSpec` per stub, in sorted ID order.
+    """
+    for stub_id in sorted(stub_relations):
+        name = stub_id.split(":", 1)[1]
+        yield NodeSpec(
+            node_id=stub_id,
+            kind="symbol",
+            name=name,
+            qualname=name,
+            # A stub stands for a name declared elsewhere -- in another module,
+            # or in a framework with no source in this repository at all.
+            source_path="",
+            metadata={"referenced_by": sorted(stub_relations[stub_id])},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1544,16 +1582,22 @@ class SwiftCodeExtractor(KGExtractor):
             del abs_path
 
         # Pass 2 — emit the graph, resolving against the completed table.
+        stub_relations: dict[str, set[str]] = {}
         for abs_path, rel_path, source, tree in self._parse_all(files):
-            yield from _FileWalker(
+            for item in _FileWalker(
                 rel_path,
                 source,
                 tree,
                 self.symbols,
                 collect_only=False,
                 spm_targets=spm_targets,
-            ).walk()
+            ).walk():
+                if isinstance(item, EdgeSpec) and item.target_id.startswith("sym:"):
+                    stub_relations.setdefault(item.target_id, set()).add(item.relation)
+                yield item
             del abs_path
+
+        yield from _stub_nodes(stub_relations)
 
     # ------------------------------------------------------------------
     # Internals
