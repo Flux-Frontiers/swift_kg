@@ -55,9 +55,14 @@ class SnapshotManager(_BaseSnapshotManager):
     package, and :meth:`_domain_metrics` adds the counts that describe a
     Swift codebase specifically.
 
-    :param snapshots_dir: Directory holding snapshot JSON files and manifest.
-    :param package_name: Package whose installed version stamps snapshots.
-    :param db_path: Optional SQLite graph path for per-module node counts.
+    The constructor is the base's, inherited unchanged: ``snapshots_dir`` is
+    the directory holding snapshot JSON files and the manifest, keyword-only
+    ``package_name`` overrides the package whose installed version stamps
+    snapshots, and keyword-only ``db_path`` points at a SQLite graph for
+    per-module node counts. Described here rather than as ``:param:`` tags
+    because this class declares no ``__init__`` for them to document -- griffe
+    matches those against the signature the documented object itself carries,
+    and reports every one of them as unmatched when there is none.
     """
 
     package_name = "swift-kg"
