@@ -57,7 +57,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Swift",
 ]
 requires-python = ">=3.12,<3.14"
 dependencies = [
