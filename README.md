@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: Elastic-2.0](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)
 [![PyPI](https://img.shields.io/pypi/v/swift-kg.svg)](https://pypi.org/project/swift-kg/)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/Flux-Frontiers/swift_kg/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/Flux-Frontiers/swift_kg/releases)
 [![CI](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml)
 [![Docs](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)

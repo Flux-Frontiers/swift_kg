@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-14
+
 ### Added
 
 - **`symbol` stub nodes, and the resolution pass that needs them.** The
@@ -285,5 +287,6 @@ First release. SwiftKG is the fleet's fourth language module, built on
   Deterministic AST extraction that works on any checkout — and on Linux CI —
   is worth more than resolution that works only where the target compiles.
 
-[Unreleased]: https://github.com/Flux-Frontiers/swift_kg/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Flux-Frontiers/swift_kg/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Flux-Frontiers/swift_kg/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Flux-Frontiers/swift_kg/releases/tag/v0.1.0
