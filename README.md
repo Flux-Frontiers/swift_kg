@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: Elastic-2.0](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](https://www.elastic.co/licensing/elastic-license)
 [![PyPI](https://img.shields.io/pypi/v/swift-kg.svg)](https://pypi.org/project/swift-kg/)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/Flux-Frontiers/swift_kg/releases)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/Flux-Frontiers/swift_kg/releases)
 [![CI](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml)
 [![Docs](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
@@ -217,13 +217,13 @@ If you use SwiftKG in your research or project, please cite it:
 
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22759432-blue.svg)](https://doi.org/10.5281/zenodo.22759432)
 
-> Suchanek, E. G. (2026). *SwiftKG: Semantic Knowledge Graph for Swift Codebases* (Version 0.2.0) [Software]. Flux-Frontiers. https://doi.org/10.5281/zenodo.22759432
+> Suchanek, E. G. (2026). *SwiftKG: Semantic Knowledge Graph for Swift Codebases* (Version 0.2.1) [Software]. Flux-Frontiers. https://doi.org/10.5281/zenodo.22759432
 
 ```bibtex
 @software{suchanek_swift_kg,
   author    = {Suchanek, Eric G.},
   title     = {{SwiftKG}: Semantic Knowledge Graph for Swift Codebases},
-  version   = {0.2.0},
+  version   = {0.2.1},
   year      = {2026},
   publisher = {Flux-Frontiers},
   doi       = {10.5281/zenodo.22759432},
