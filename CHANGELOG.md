@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Zenodo concept DOI, `10.5281/zenodo.22759432`,** in `CITATION.cff`,
+  as a README badge, and in a README citation section with APA and BibTeX,
+  matching `tscode_kg`. No archive existed to cite until v0.2.0 minted the
+  first one on 2026-09-14. The concept DOI resolves to the newest archive, so
+  it does not change at release time; `CITATION.cff` says so in a comment.
+
 ## [0.2.0] - 2026-09-14
 
 ### Added

@@ -7,6 +7,7 @@
 [![CI](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/ci.yml)
 [![Docs](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml/badge.svg)](https://github.com/Flux-Frontiers/swift_kg/actions/workflows/docs.yml)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22759432-blue.svg)](https://doi.org/10.5281/zenodo.22759432)
 
 Knowledge graph for Swift codebases -- deterministic AST extraction, hybrid semantic + structural search.
 
@@ -212,7 +213,25 @@ Eric G. Suchanek, PhD — [Flux-Frontiers](https://github.com/Flux-Frontiers)
 
 ## Citation
 
-See [`CITATION.cff`](CITATION.cff).
+If you use SwiftKG in your research or project, please cite it:
+
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22759432-blue.svg)](https://doi.org/10.5281/zenodo.22759432)
+
+> Suchanek, E. G. (2026). *SwiftKG: Semantic Knowledge Graph for Swift Codebases* (Version 0.2.0) [Software]. Flux-Frontiers. https://doi.org/10.5281/zenodo.22759432
+
+```bibtex
+@software{suchanek_swift_kg,
+  author    = {Suchanek, Eric G.},
+  title     = {{SwiftKG}: Semantic Knowledge Graph for Swift Codebases},
+  version   = {0.2.0},
+  year      = {2026},
+  publisher = {Flux-Frontiers},
+  doi       = {10.5281/zenodo.22759432},
+  url       = {https://github.com/Flux-Frontiers/swift_kg},
+}
+```
+
+Full citation metadata in [`CITATION.cff`](CITATION.cff).
 
 ## License
 
