@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   maintainer-only `kg` group's `pycode-kg` to `>=0.27.1` (was `>=0.27.0`),
   for the fleet's current releases. Nothing in this repo depends on either
   specifically; this is a currency bump.
+- **`ruff` floor raised from `>=0.4.0` to `>=0.15`**, inside the existing
+  `<0.16` cap (`kgrag_priv` sweep item 49, tier 1). Every fleet lock already
+  installs 0.15, so the old floor meant nothing.
+- **`mcp` floor raised from `>=1.0.0` to `>=1.3.0`**, keeping the `<2` cap
+  (`kgrag_priv` sweep item 47). `swiftkg-mcp` passes both `instructions=` and
+  `lifespan=` to `FastMCP`, and 1.3.0 is the first release whose `FastMCP`
+  accepts either; `mcp.server.fastmcp` does not exist at all below 1.2.0. The
+  lock already resolved far above it, so the floor was wrong rather than the
+  environment. This matters more here than in most of the fleet: `swift_kg` is
+  one of only three repos that pass a `lifespan`, so a resolver landing below
+  1.3.0 would break it at construction rather than merely ignore an argument.
 
 ## [0.2.1] - 2026-09-15
 
