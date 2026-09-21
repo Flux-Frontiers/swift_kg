@@ -140,31 +140,6 @@ optional = true
 mkdocs-material = ">=9.5"
 mkdocstrings = { version = ">=0.26", extras = ["python"] }
 
-# ---------------------------------------------------------------------------
-# Maintainer tooling (Poetry group, not a PEP 621 extra)
-# ---------------------------------------------------------------------------
-# pycode-kg is a tool this repo *runs*, not a library it imports: PyCodeKG
-# indexes this repo's own Python source from the outside, via the `pycodekg`
-# CLI in .git/hooks/pre-commit. SwiftKG cannot index itself — this repository
-# is Python, and Swift is what it reads.
-#
-# It belongs in a Poetry group, not `dev`, and the reason is CI weight rather
-# than metadata: pycode-kg and doc-kg pull sentence-transformers and torch
-# transitively, and `dev` is what every lint, type-check and test job installs.
-# The `kg` group is skipped by default precisely so CI can decline it.
-#
-#   poetry install --with kg      # get the pycodekg CLI into .venv/bin
-#   poetry install                # default: group is optional, skipped
-[tool.poetry.group.kg]
-optional = true
-
-[tool.poetry.group.kg.dependencies]
-# Both floors are the releases that retired these packages' own snapshot
-# overrides and moved them onto kgmodule-utils>=0.20.0, the same SDK this repo
-# requires.
-doc-kg = ">=0.26.0"
-pycode-kg = ">=0.27.1"
-
 [project.urls]
 Homepage = "https://github.com/Flux-Frontiers/swift_kg"
 Repository = "https://github.com/Flux-Frontiers/swift_kg"
