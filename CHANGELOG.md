@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The `__enter__` override is gone** (`kgrag_priv` sweep item 5).
+  It existed only to narrow `KGModule.__enter__`, which was typed to
+  return the base class, so `with SwiftKG(...) as kg:` lost the subclass
+  surface under `ty`. kgmodule-utils 0.23.0 returns `Self`, so the
+  workaround is redundant; `ty` is clean without it.
+
 ### Changed
 
 - **Fleet dependency floors raised and relocked** (`kgrag_priv` sweep item 46):

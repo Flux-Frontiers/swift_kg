@@ -299,11 +299,6 @@ class SwiftKG(KGModule):
     def _kind_priority(self, kind: str) -> int:
         return _SWIFT_KIND_PRIORITY.get(kind, 99)
 
-    def __enter__(self) -> SwiftKG:
-        # Narrowed from the base's `-> KGModule` so `with SwiftKG(...) as kg:`
-        # keeps the subclass surface under `ty` (FLEET_STANDARDS, 2026-08-24).
-        return self
-
     def __repr__(self) -> str:
         return (
             f"SwiftKG(repo_root={self.repo_root!r}, "
