@@ -81,7 +81,7 @@ dependencies = [
     # catching `VectorStoreNotFoundError`, which that release introduced.
     # Against 0.20.x the fan-out phase fails with a raw sqlite driver error
     # and the report's "run swiftkg build" guidance never renders.
-    "kgmodule-utils[semantic,sqlite-vec]>=0.22.0",
+    "kgmodule-utils[semantic,sqlite-vec]>=0.23.0",
     "click>=8.1.0,<9",
     # Upper-bounded: mcp 2.0 removed the bundled `mcp.server.fastmcp` module
     # (FastMCP was split out into the standalone `fastmcp` package) and rebuilt
