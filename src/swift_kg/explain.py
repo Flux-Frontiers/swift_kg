@@ -17,7 +17,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from swift_kg.validation import bounded_int, normalize_node_id
+from kg_utils.validation import bounded_int
+
+from swift_kg.validation import normalize_node_id
 
 _SWIFT_EXT_RE = re.compile(r"\.swift$")
 

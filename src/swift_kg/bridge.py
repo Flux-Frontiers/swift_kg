@@ -25,8 +25,9 @@ License: Elastic 2.0
 import sqlite3
 from collections import defaultdict
 
+from kg_utils.validation import bounded_int
+
 from swift_kg.centrality import CentralityRecord, StructuralImportanceRanker
-from swift_kg.validation import bounded_int
 
 
 def compute_bridge_centrality(

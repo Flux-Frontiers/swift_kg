@@ -140,6 +140,16 @@ class TestValidation:
         with pytest.raises(ValueError, match="empty"):
             kg.query("   ")
 
+    def test_query_rejects_an_over_long_query(self, kg: SwiftKG) -> None:
+        """SwiftKG keeps a 500-character cap, tighter than the SDK's default."""
+        with pytest.raises(ValueError, match="at most 500"):
+            kg.query("a" * 501)
+
+    def test_query_rejects_a_bool_for_k(self, kg: SwiftKG) -> None:
+        """The SDK's validator rejects True, which the old local copy took as 1."""
+        with pytest.raises(ValueError, match="k must be an integer"):
+            kg.query("anything", k=True)
+
     def test_pack_rejects_an_over_long_query(self, kg: SwiftKG) -> None:
         with pytest.raises(ValueError, match="at most"):
             kg.pack("a" * 501)
