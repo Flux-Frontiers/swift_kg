@@ -27,10 +27,12 @@ except ImportError as _e:
         f"Original error: {_e}"
     ) from _e
 
+from kg_utils.validation import bounded_int
+
 from swift_kg.config import load_exclude_dirs, load_include_dirs
 from swift_kg.extractor import SwiftCodeExtractor
 from swift_kg.resolution import resolve_symbols_pruned
-from swift_kg.validation import bounded_int, normalize_node_id, require_query
+from swift_kg.validation import MAX_QUERY_LEN, normalize_node_id
 
 __all__ = [
     "SwiftKG",
@@ -90,6 +92,9 @@ class SwiftKG(KGModule):
     """
 
     _default_dir = ".swiftkg"
+    #: Tighter than the SDK default, because the MCP server can take queries
+    #: over SSE; the base class applies it in query() and pack().
+    max_query_len = MAX_QUERY_LEN
 
     def __init__(
         self,
@@ -164,66 +169,26 @@ class SwiftKG(KGModule):
     # ------------------------------------------------------------------
     # Validated entry points
     # ------------------------------------------------------------------
-    # Per FLEET_STANDARDS (settled 2026-08-24), validation lives here rather
-    # than in the CLI and the MCP server separately: both funnel through these
-    # methods, so one set of checks covers both surfaces and cannot drift.
-
-    def query(  # type: ignore[override]
-        self,
-        q: str,
-        *,
-        k: int = 8,
-        hop: int = 1,
-        max_nodes: int = 25,
-        **kwargs: Any,
-    ) -> QueryResult:
-        """Hybrid query with bounded inputs.
-
-        :param q: Natural-language query (1–500 characters).
-        :param k: Semantic seed count (1–100).
-        :param hop: Graph expansion hops (0–5).
-        :param max_nodes: Maximum nodes returned (1–500).
-        :param kwargs: Remaining :meth:`kg_utils.pipeline.KGModule.query` options.
-        :return: :class:`~kg_utils.specs.QueryResult`.
-        :raises ValueError: If any bound is exceeded.
-        """
-        return super().query(
-            require_query(q),
-            k=bounded_int("k", k, 1, 100),
-            hop=bounded_int("hop", hop, 0, 5),
-            max_nodes=bounded_int("max_nodes", max_nodes, 1, 500),
-            **kwargs,
-        )
+    # The base class bounds q, k, hop and max_nodes in query() and pack()
+    # (per FLEET_STANDARDS, settled 2026-08-24); this override adds the one
+    # pack() bound it lacks.
 
     def pack(  # type: ignore[override]
         self,
         q: str,
         *,
-        k: int = 8,
-        hop: int = 1,
-        max_nodes: int | None = 15,
         max_lines: int = 60,
         **kwargs: Any,
     ) -> SnippetPack:
-        """Hybrid query + snippet extraction with bounded inputs.
+        """Hybrid query + snippet extraction, with ``max_lines`` bounded.
 
-        :param q: Natural-language query (1–500 characters).
-        :param k: Semantic seed count (1–100).
-        :param hop: Graph expansion hops (0–5).
-        :param max_nodes: Maximum nodes in the pack (1–500, or ``None``).
-        :param max_lines: Maximum lines per snippet (1–2000).
+        :param q: Natural-language query (1-500 characters).
+        :param max_lines: Maximum lines per snippet (1-2000).
         :param kwargs: Remaining :meth:`kg_utils.pipeline.KGModule.pack` options.
         :return: :class:`~kg_utils.specs.SnippetPack`.
         :raises ValueError: If any bound is exceeded.
         """
-        return super().pack(
-            require_query(q),
-            k=bounded_int("k", k, 1, 100),
-            hop=bounded_int("hop", hop, 0, 5),
-            max_nodes=None if max_nodes is None else bounded_int("max_nodes", max_nodes, 1, 500),
-            max_lines=bounded_int("max_lines", max_lines, 1, 2000),
-            **kwargs,
-        )
+        return super().pack(q, max_lines=bounded_int("max_lines", max_lines, 1, 2000), **kwargs)
 
     def node(self, node_id: str) -> dict[str, Any] | None:
         """Fetch a single node, accepting the ID forms callers actually pass.

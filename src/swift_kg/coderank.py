@@ -34,8 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import networkx as nx
-
-from swift_kg.validation import bounded_int
+from kg_utils.validation import bounded_int
 
 DEFAULT_EDGE_WEIGHTS: dict[str, float] = {
     "CALLS": 1.00,

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The local copies of `bounded_int` and `require_query` are gone**
+  (`kgrag_priv` sweep item 52). They come from `kg_utils.validation`, and
+  the `query()` override that applied them is deleted: the base class
+  bounds `q`, `k`, `hop` and `max_nodes` in `query()` and `pack()`.
+  SwiftKG keeps its 500-character query cap as the `max_query_len` class
+  attribute, and `pack()` keeps an override only to bound `max_lines`.
+
+### Changed
+
+- **Stricter integer checks.** The SDK's `bounded_int` rejects a bool and a
+  non-integral float, which the local copy accepted: `k=True` was taken as
+  1, and `k=3.7` as 3. Both now raise `ValueError`.
+- **`kgmodule-utils` floor raised to `>=0.26.0`**, the latest release.
+
 ## [0.3.0] - 2026-09-21
 
 ### Removed

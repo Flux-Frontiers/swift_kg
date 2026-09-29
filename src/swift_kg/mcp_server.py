@@ -86,11 +86,12 @@ from pathlib import Path
 
 from kg_utils.semantic import DEFAULT_MODEL
 from kg_utils.store import DEFAULT_RELS
+from kg_utils.validation import bounded_int, require_query
 from mcp.server.fastmcp import FastMCP
 
 from swift_kg.kg import SwiftKG
 from swift_kg.snapshots import SnapshotManager
-from swift_kg.validation import bounded_int, normalize_node_id, require_query
+from swift_kg.validation import MAX_QUERY_LEN, normalize_node_id
 
 # ---------------------------------------------------------------------------
 # Global state — initialised in main()
@@ -740,7 +741,7 @@ def find_node(name: str, kind: str = "", limit: int = 100) -> str:
     :return: JSON array of matching node dicts.
     """
     try:
-        name = require_query(name)
+        name = require_query(name, MAX_QUERY_LEN)
         limit = bounded_int("limit", limit, 1, 5000)
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, indent=2)
