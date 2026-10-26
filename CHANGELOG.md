@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-26
+
 ### Changed
 
 - **The MCP server is built on the fleet's shared base, `kg_utils.mcp`.**
@@ -63,8 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call.** They read the lazy `_store` attribute, which is `None` until the
   store is first opened, and answered "No database store available."
 
-**Needs `kgmodule-utils` 0.29.0**, unreleased: this branch is developed
-against its local wheel, and the floor and lock move when it ships.
+**Needs `kgmodule-utils` 0.29.0:** the floor is
+`kgmodule-utils[semantic,sqlite-vec,mcp]>=0.29.0`, and its `[mcp]` extra
+replaces the direct `mcp` pin.
 
 ## [0.4.0] - 2026-09-29
 
