@@ -1,14 +1,23 @@
 # MCP server
 
-`swiftkg mcp` exposes the graph to any MCP-compatible agent over stdio or SSE.
+`swiftkg mcp` exposes the graph to any MCP-compatible agent over stdio or
+streamable HTTP. It is built on the fleet's shared server base,
+`kg_utils.mcp`, so it takes the same flags as every fleet KG server:
 
 ```bash
 swiftkg mcp --repo /path/to/swift-repo
+swiftkg mcp --repo REPO [--db FILE] [--vectors FILE] [--model NAME] \
+            [--transport stdio|streamable-http] [--host H] [--port N]
+swiftkg mcp --repo REPO --manifest   # print the tool list as JSON and exit
 ```
 
-Build the graph first — the server warns and starts anyway if
-`.swiftkg/graph.sqlite` is missing, so an agent gets an explanatory error
-rather than a silent connection failure.
+`--db` and `--vectors` default to `.swiftkg/graph.sqlite` and
+`.swiftkg/vectors.sqlite`; a relative path is taken from `--repo`.
+`--manifest` answers without opening the graph. `swiftkg-mcp` is the same
+command under the name older configs use.
+
+Build the graph first. A session is refused when `.swiftkg/graph.sqlite` does
+not exist, rather than served an empty graph.
 
 ## Client configuration
 
@@ -18,8 +27,8 @@ rather than a silent connection failure.
 {
   "mcpServers": {
     "swiftkg": {
-      "command": "swiftkg-mcp",
-      "args": ["--repo", "/path/to/swift-repo"]
+      "command": "swiftkg",
+      "args": ["mcp", "--repo", "/path/to/swift-repo"]
     }
   }
 }
@@ -32,8 +41,8 @@ rather than a silent connection failure.
   "servers": {
     "swiftkg": {
       "type": "stdio",
-      "command": "swiftkg-mcp",
-      "args": ["--repo", "${workspaceFolder}"]
+      "command": "swiftkg",
+      "args": ["mcp", "--repo", "${workspaceFolder}"]
     }
   }
 }
@@ -69,15 +78,24 @@ question about a type or protocol.
 Swift states access level with a keyword and SwiftKG stores it, so this reads
 the graph rather than guessing.
 
-### Shared with the fleet
+### Canonical (the same names on every fleet KG server)
 
 | Tool | Purpose |
 |------|---------|
-| `graph_stats()` | Node/edge counts by kind and relation, plus doc coverage. Start here. |
-| `query_codebase(q, k, hop, rels, max_nodes, min_score, max_per_module, rerank_mode)` | Hybrid semantic + structural search |
-| `pack_snippets(q, …)` | Same search, returning source as a Markdown context pack |
+| `stats()` | Node/edge counts in the fleet shape (`kind`, `nodes.by_kind`, `edges.by_rel`), plus doc coverage and meaningful nodes. Start here. |
+| `query(q, k, hop, rels, max_nodes, min_score, max_per_module, rerank_mode, ...)` | Hybrid semantic + structural search; JSON |
+| `pack(q, k, hop, rels, context, max_lines, max_nodes, ...)` | Same search, returning source as a Markdown context pack |
+| `get_node(node_id)` | Precise lookup by stable ID |
+| `neighbors(node_id, rels, direction, limit)` | A node's one-hop neighborhood: its edges and the nodes at their far ends |
+
+`rels` is a list (`["CALLS", "CONFORMS"]`); omitted, `query` and `pack`
+follow all six Swift relations.
+
+### Other code-graph tools
+
+| Tool | Purpose |
+|------|---------|
 | `callers(node_id, rel, paths)` | Reverse lookup through any relation, resolving `sym:` stubs |
-| `get_node(node_id, include_edges)` | Precise lookup by stable ID |
 | `list_nodes(module_path, kind)` | Filter by path prefix and/or kind |
 | `find_node(name, kind)` | Find by name when the ID is unknown |
 | `centrality(top, kinds, group_by)` | SIR weighted PageRank |
@@ -103,7 +121,7 @@ returning nothing.
 
 ## Workflows
 
-- **Explore an unfamiliar repo** — `graph_stats` → `query_codebase` → `pack_snippets`
+- **Explore an unfamiliar repo** -- `stats` -> `query` -> `pack`
 - **Understand a type** — `find_node(name)` → `type_hierarchy(node_id)`
 - **Find a protocol's implementations** — `find_node(name)` → `type_hierarchy(node_id)`
 - **Review a module's exposed surface** — `public_api(module_path="Sources/Networking")`
@@ -112,16 +130,20 @@ returning nothing.
 
 ## Notes
 
-The server closes its SQLite handle on shutdown via a `lifespan` hook, which
-covers both transports. Inputs are bounded — `k` 1–100, `hop` 0–5, `max_nodes`
+The server opens the graph when a session starts and closes it when the
+session ends. Under stdio, stray output from a tool goes to stderr and cannot
+corrupt the protocol stream. Inputs are bounded — `k` 1–100, `hop` 0–5, `max_nodes`
 1–500, queries ≤ 500 characters — and validated in the `SwiftKG` methods
 themselves, so the CLI and this server are covered by one set of checks. The
-SSE transport can serve beyond a trusted local environment, which is why those
+streamable HTTP transport can serve beyond a trusted local environment, which is why those
 are real bounds rather than ergonomics.
 
 ## Keeping the docs in sync
 
-Any change to a tool's signature, parameters, defaults or behaviour in
-`src/swift_kg/mcp_server.py` must update the module docstring's Tools list and
-the `FastMCP(instructions=...)` block **in the same commit**.
-`tests/test_mcp_server.py` asserts that every registered tool appears in both.
+The server's instructions are generated: the hand-written `PREAMBLE` in
+`src/swift_kg/mcp_server.py` followed by one line per tool, taken from each
+tool's docstring. Nothing lists the tools by hand, so a tool's docstring is
+its documentation; a change to a tool's signature, parameters, defaults or
+behavior updates its docstring in the same commit. `swiftkg mcp --manifest`
+prints the live tool list, and `tests/test_mcp_server.py` checks that this
+page and `skills/swiftkg/SKILL.md` name every tool in it.

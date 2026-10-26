@@ -9,8 +9,9 @@
   ],
   "mcpServers": {
     "swiftkg": {
-      "command": "swiftkg-mcp",
+      "command": "swiftkg",
       "args": [
+        "mcp",
         "--repo",
         "/absolute/path/to/swift-repo",
         "--db",

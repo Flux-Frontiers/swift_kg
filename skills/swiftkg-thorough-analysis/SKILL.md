@@ -110,7 +110,7 @@ Alternatively, from an MCP session simply call `analyze_repo()` — same analysi
 | **SIR centrality** | Independent structural-importance ranking; agreement with CodeRank strengthens the signal |
 | **Orphans** | Dead-code candidates — but Swift's framework-driven entry points are excluded — `public`/`open` declarations, protocol witnesses, SwiftUI `body`, UIKit lifecycle methods and test code. Not every zero-caller node is dead, and in Swift most of them are not |
 | **Module coupling** | High cross-module CALLS + IMPORTS with low cohesion = tight coupling; candidates for boundary cleanup |
-| **doc-comment coverage** | Directly determines semantic retrieval quality: good coverage → strong `query_codebase`/`pack_snippets` results; low coverage → degraded semantic queries |
+| **doc-comment coverage** | Directly determines semantic retrieval quality: good coverage → strong `query`/`pack` results; low coverage → degraded semantic queries |
 | **Hierarchy depth** | Deep INHERITS/EXTENDS chains signal fragile base-class problems |
 | **Quality grade** | A/B = healthy; C = act on top warnings; D/F = structural work needed before feature work |
 

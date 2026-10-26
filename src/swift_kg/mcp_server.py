@@ -1,130 +1,99 @@
 #!/usr/bin/env python3
 """
-mcp_server.py — SwiftKG MCP Server
+mcp_server.py -- SwiftKG MCP Server
 
-Exposes the SwiftKG hybrid query and snippet-pack pipeline as
-Model Context Protocol (MCP) tools, allowing any MCP-compatible agent
-(Claude Desktop, Cursor, Continue, etc.) to query a Swift
-codebase knowledge graph directly.
+Serves a Swift codebase's knowledge graph to any MCP-compatible agent
+(Claude Code, Claude Desktop, Cursor, Copilot) over the fleet's shared server
+base, :mod:`kg_utils.mcp`.
 
-Tools
+The server answers the fleet's canonical tools -- ``stats``, ``query``,
+``pack``, ``get_node``, ``neighbors`` -- under the same names as every other
+KG server, plus SwiftKG's own code-graph tools (``callers``,
+``type_hierarchy``, ``public_api``, ``explain``, ``centrality``, the CodeRank
+and snapshot tools, ...). ``query`` and ``pack`` are SwiftKG's richer versions
+of the canonical pair: hybrid reranking by default, a per-module cap, and all
+six Swift relations (including CONFORMS and EXTENDS) followed by default.
+
+The tool list is not kept by hand anywhere. Each tool's docstring is its
+description, the server's instructions are generated from them, and::
+
+    swiftkg mcp --manifest
+
+prints the whole list as JSON without opening the graph.
+
+Usage
 -----
-query_codebase(q, k, hop, rels, max_nodes, min_score, max_per_module, rerank_mode)
-    Hybrid semantic + structural query. Returns ranked nodes and edges.
+Install the package, then run::
 
-pack_snippets(q, k, hop, rels, context, max_lines, max_nodes, min_score, rerank_mode)
-    Hybrid query + source-grounded snippet extraction.
+    swiftkg mcp --repo /path/to/swift-repo
 
-callers(node_id, rel, paths)
-    Reverse lookup: find all callers of a node, resolving sym: stubs.
+``--db`` and ``--vectors`` are optional; they default to
+``.swiftkg/graph.sqlite`` and ``.swiftkg/vectors.sqlite``, and a relative
+path is taken from ``--repo``. ``swiftkg-mcp`` is the same command under the
+name older Claude Desktop and Copilot configs use.
 
-type_hierarchy(node_id)
-    Conformers, subclasses, extensions and declared supertypes of one type.
+Per-project config for Claude Code and Kilo Code (``.mcp.json``)::
 
-public_api(module_path, limit)
-    The declared `public` / `open` API surface, read from access levels.
-
-get_node(node_id, include_edges)
-    Fetch a single node by its stable ID.
-
-graph_stats()
-    Return node and edge counts by kind/relation as Markdown.
-
-list_nodes(module_path, kind, limit)
-    List nodes filtered by module path prefix and/or kind.
-
-find_node(name, kind, limit)
-    Find nodes by plain name or qualname substring.
-
-centrality(top, kinds, group_by)
-    SIR PageRank — rank nodes or modules by structural importance.
-
-bridge_centrality(top, include_imports)
-    Module connectivity — unique module interactions per module.
-
-framework_nodes(top)
-    Framework-like hub modules via SIR + module connectivity.
-
-find_definition_at(file, line)
-    Reverse-resolve a (file, line) location to a node and explain it.
-
-analyze_repo()
-    Run structural analysis and return a Markdown report.
-
-explain(node_id, limit)
-    Natural-language explanation of a node: callers, callees, role.
-
-rank_nodes(top, rels, persist_metric, exclude_tests)
-    Global weighted CodeRank (PageRank) over the repository graph.
-
-query_ranked(q, k, mode, top, rels, radius, exclude_tests)
-    CodeRank-enhanced hybrid or personalized-PageRank query ranking.
-
-explain_rank(node_id, q)
-    Explain the CodeRank score components for a specific node.
-
-snapshot_list(limit, branch)
-    List saved temporal metric snapshots, most recent first.
-
-snapshot_show(key)
-    Show full details of one snapshot ("latest" for the most recent).
-
-snapshot_diff(key_a, key_b)
-    Compare two metric snapshots side-by-side.
+    {
+      "mcpServers": {
+        "swiftkg": {
+          "command": "swiftkg",
+          "args": ["mcp", "--repo", "/path/to/swift-repo"]
+        }
+      }
+    }
 
 Author: Eric G. Suchanek, PhD
 """
 
 from __future__ import annotations
 
-import argparse
 import json
-import sys
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
+from kg_utils.mcp import Context, KGServer, kg_from, make_server
 from kg_utils.semantic import DEFAULT_MODEL
-from kg_utils.store import DEFAULT_RELS
 from kg_utils.validation import bounded_int, require_query
-from mcp.server.fastmcp import FastMCP
 
+from swift_kg import __version__
 from swift_kg.kg import SwiftKG
 from swift_kg.snapshots import SnapshotManager
 from swift_kg.validation import MAX_QUERY_LEN, normalize_node_id
 
+#: Relations ``query`` and ``pack`` follow when ``rels`` is omitted: all six
+#: SwiftKG emits, so conformances and extensions are expanded by default.
+_DEFAULT_RELS: tuple[str, ...] = (
+    "CONTAINS",
+    "CALLS",
+    "IMPORTS",
+    "INHERITS",
+    "CONFORMS",
+    "EXTENDS",
+)
+
 # ---------------------------------------------------------------------------
-# Global state — initialised in main()
+# Helpers
 # ---------------------------------------------------------------------------
 
-_kg: SwiftKG | None = None
-_snapshot_mgr: SnapshotManager | None = None
+
+def _snapshots(kg: SwiftKG) -> SnapshotManager:
+    """Return the snapshot manager for the session's graph.
+
+    :param kg: The session's graph.
+    :return: A :class:`SnapshotManager` over ``<repo>/.swiftkg/snapshots``.
+    """
+    return SnapshotManager(kg.repo_root / ".swiftkg" / "snapshots", db_path=kg.db_path)
 
 
-def _get_kg() -> SwiftKG:
-    if _kg is None:
-        raise RuntimeError(
-            "SwiftKG not initialised. Run the server via 'swiftkg-mcp --repo /path/to/repo'"
-        )
-    return _kg
-
-
-def _get_snapshot_mgr() -> SnapshotManager:
-    if _snapshot_mgr is None:
-        raise RuntimeError(
-            "SnapshotManager not initialised. Run the server via 'swiftkg-mcp --repo /path/to/repo'"
-        )
-    return _snapshot_mgr
-
-
-def _snapshot_freshness(snapshot_total_nodes: int) -> dict:
+def _snapshot_freshness(kg: SwiftKG, snapshot_total_nodes: int) -> dict:
     """Compare a snapshot's node count against the currently loaded graph DB.
 
+    :param kg: The session's graph.
     :param snapshot_total_nodes: ``metrics.total_nodes`` from a snapshot object.
     :return: Freshness metadata payload.
     """
-    current = _get_kg().stats()
-    current_nodes = int(current.get("total_nodes", 0))
+    current_nodes = int(kg.stats()["nodes"]["total"])
     delta = current_nodes - int(snapshot_total_nodes)
 
     is_fresh = delta == 0
@@ -149,146 +118,85 @@ def _snapshot_freshness(snapshot_total_nodes: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# MCP server
+# Instructions: the hand-written part. The tool list is appended by kg_utils.mcp.
 # ---------------------------------------------------------------------------
 
-
-@asynccontextmanager
-async def _lifespan(_server: FastMCP) -> AsyncIterator[None]:
-    """Close the long-lived SwiftKG instance when the server shuts down.
-
-    Per FLEET_STANDARDS (settled 2026-08-24): ``KGModule`` owns a SQLite
-    handle, and leaking it to process exit is merely untidy for a one-shot
-    command but a real leak for a long-lived server. The stdio and SSE
-    transports both route through the same ``Server.run()``, so this one hook
-    covers both.
-    """
-    try:
-        yield
-    finally:
-        if _kg is not None:
-            _kg.close()
-
-
-mcp = FastMCP(
-    "swiftkg",
-    lifespan=_lifespan,
-    instructions=(
-        "SwiftKG is a hybrid semantic + structural knowledge graph for Swift and "
-        "Swift codebases. It indexes every file, class, struct, enum, protocol, actor, "
-        "extension, function, method, property and type alias as a node, with typed edges "
-        "(CALLS, IMPORTS, CONTAINS, INHERITS, CONFORMS, EXTENDS) connecting them.\n\n"
-        "## Tools\n\n"
-        "**graph_stats()** — Start here. Returns node/edge counts by kind and relation "
-        "plus doc-comment coverage. Use before issuing query_codebase() or pack_snippets().\n\n"
-        "**query_codebase(q, k, hop, rels, max_nodes, min_score, max_per_module, rerank_mode)** — "
-        "Hybrid semantic + structural search. Seeds on vector similarity then expands through "
-        "the graph. Returns ranked nodes and edges as JSON.\n\n"
-        "**pack_snippets(q, k, hop, rels, context, max_lines, max_nodes, min_score, rerank_mode)** — "
-        "Same hybrid search, but returns actual source code as a Markdown context pack "
-        "with ranked, deduplicated snippets and line numbers.\n\n"
-        "**callers(node_id, rel, paths)** — Precise reverse lookup: every node that calls "
-        "(or inherits from, imports, …) the given node, resolving cross-module sym: stubs. "
-        "Filter with paths='Sources/' to exclude test callers.\n\n"
-        "**type_hierarchy(node_id)** — Everything about one Swift type at once: its "
-        "conformers (if a protocol), subclasses, the extensions declared on it — which in "
-        "Swift routinely live in other files — and what it conforms to and inherits from. "
-        "Start here for any question about a type or protocol.\n\n"
-        "**public_api(module_path, limit)** — The declared `public` / `open` surface, read "
-        "from Swift access levels stored on each node rather than inferred.\n\n"
-        "**get_node(node_id, include_edges)** — Precise lookup of a single node by its stable "
-        "ID (e.g. 'cls:Sources/Networking/Client.swift:HTTPClient').\n\n"
-        "**list_nodes(module_path, kind, limit)** — List nodes filtered by module path and/or "
-        "kind. `limit` defaults to 500; an unfiltered call on a large repository would otherwise "
-        "return every node.\n\n"
-        "**find_node(name, kind, limit)** — Find nodes by name substring when the stable ID is "
-        "unknown. `limit` defaults to 100.\n\n"
-        "**centrality(top, kinds, group_by)** — Structural Importance Ranking (SIR): "
-        "deterministic weighted PageRank over the graph. group_by='node' ranks individual "
-        "nodes; group_by='module' aggregates per module. Use to find hotspots before "
-        "refactoring or review.\n\n"
-        "**bridge_centrality(top, include_imports)** — Module connectivity: how many unique "
-        "modules each module calls or is called by. Identifies orchestrator/hub modules.\n\n"
-        "**framework_nodes(top)** — Framework-like hub modules: 0.6 × SIR + 0.4 × "
-        "connectivity (both normalized). Surfaces the repo-defining abstractions.\n\n"
-        "**find_definition_at(file, line)** — Reverse-resolve a (file, line) location to the "
-        "innermost enclosing node and return its explain() report.\n\n"
-        "**analyze_repo()** — Structural analysis: node counts, edge counts, doc-comment coverage, "
-        "node distribution by kind.\n\n"
-        "**explain(node_id, limit)** — Natural-language Markdown explanation of a node: "
-        "metadata, doc-comment, callers, callees, and its role in the codebase.\n\n"
-        "**rank_nodes(top, rels, persist_metric, exclude_tests)** — Global weighted CodeRank "
-        "(PageRank). Returns the most structurally important nodes as JSON.\n\n"
-        "**query_ranked(q, k, mode, top, rels, radius, exclude_tests)** — Query ranking that "
-        "combines semantic seeds with centrality and graph proximity ('hybrid') or "
-        "personalized PageRank ('ppr'); results include 'why' explanations.\n\n"
-        "**explain_rank(node_id, q)** — Break down a node's CodeRank score: global rank, "
-        "inbound/outbound structural edges, and optional query-conditioned scores.\n\n"
-        "**snapshot_list(limit, branch)** — List saved temporal metric snapshots (most recent "
-        "first) with per-snapshot deltas and freshness vs. the live graph.\n\n"
-        "**snapshot_show(key)** — Full details of one snapshot; pass 'latest' (default) for "
-        "the most recent.\n\n"
-        "**snapshot_diff(key_a, key_b)** — Side-by-side comparison of two snapshots with "
-        "computed deltas (b − a).\n\n"
-        "## Recommended Workflows\n\n"
-        "- **Explore unfamiliar Swift repo**: graph_stats → query_codebase → pack_snippets\n"
-        "- **Find a specific class/function**: find_node(name) → get_node(include_edges=True)\n"
-        "- **Understand a protocol**: get_node → callers(rel='CONFORMS')\n"
-        "- **Trace usage of a symbol**: find_node(name) → callers(node_id)\n"
-        "- **Understand a Swift type**: find_node(name) → type_hierarchy(node_id)\n"
-        "- **Find a protocol's implementations**: find_node(name) → type_hierarchy(node_id)\n"
-        "- **Review a module's exposed surface**: public_api(module_path='Sources/Networking')\n"
-        "- **Identify structural hotspots**: centrality(top=20) or centrality(group_by='module')\n"
-        "- **Architecture review**: analyze_repo\n"
-        "- **Track codebase evolution**: snapshot_list → snapshot_diff(key_a, key_b)\n"
-        "- **Answer 'how does X work?'**: pack_snippets with a descriptive query\n\n"
-        "## Argument bounds\n\n"
-        "Out-of-range arguments are rejected with a message naming the accepted range, rather "
-        "than silently clamped — a truncated result that looks complete is worse than an error. "
-        "`k` 1-100, `hop` 0-5, `max_nodes` 1-500, `max_lines` 1-2000, `radius` 0-5, "
-        "`top` 1-1000, `limit` 1-5000 (`snapshot_list` accepts 0 for 'all'), "
-        "queries at most 500 characters. A `node_id` may be passed with surrounding backticks "
-        "or quotes; it is normalized before use.\n"
-    ),
+PREAMBLE = (
+    "SwiftKG is a hybrid semantic + structural knowledge graph for Swift codebases. "
+    "It indexes every file, class, struct, enum, protocol, actor, extension, function, "
+    "method, property and type alias as a node, with typed edges (CALLS, IMPORTS, "
+    "CONTAINS, INHERITS, CONFORMS, EXTENDS) between them. Node IDs look like "
+    "'<kind>:<module_path>:<qualname>', e.g. "
+    "'cls:Sources/Networking/Client.swift:HTTPClient'.\n\n"
+    "## Recommended workflows\n\n"
+    "- **Explore an unfamiliar Swift repo**: stats -> query -> pack\n"
+    "- **Find a specific class/function**: find_node(name) -> get_node -> neighbors\n"
+    "- **Understand a Swift type or protocol**: find_node(name) -> type_hierarchy(node_id)\n"
+    "- **Trace usage of a symbol**: find_node(name) -> callers(node_id)\n"
+    "- **Find a protocol's implementations**: callers(node_id, rel='CONFORMS') or "
+    "type_hierarchy(node_id)\n"
+    "- **Review a module's exposed surface**: public_api(module_path='Sources/Networking')\n"
+    "- **Identify structural hotspots**: centrality(top=20) or centrality(group_by='module')\n"
+    "- **Architecture review**: analyze_repo\n"
+    "- **Track codebase evolution**: snapshot_list -> snapshot_diff(key_a, key_b)\n"
+    "- **Answer 'how does X work?'**: pack with a descriptive query\n\n"
+    "## Argument bounds\n\n"
+    "Out-of-range arguments are rejected with a message naming the accepted range, rather "
+    "than silently clamped -- a truncated result that looks complete is worse than an "
+    "error. `k` 1-100, `hop` 0-5, `max_nodes` 1-500, `max_lines` 1-2000, `radius` 0-5, "
+    "`top` 1-1000, `limit` 1-5000 (`snapshot_list` accepts 0 for 'all'; `neighbors` "
+    "1-500), queries at most 500 characters. A `node_id` may be passed with surrounding "
+    "backticks or quotes; it is normalized before use."
 )
 
 
-@mcp.tool()
-def query_codebase(
+# ---------------------------------------------------------------------------
+# Canonical tools: SwiftKG's richer query and pack, under the fleet's names
+# ---------------------------------------------------------------------------
+
+
+def query(
     q: str,
     k: int = 8,
     hop: int = 1,
-    rels: str = "CONTAINS,CALLS,IMPORTS,INHERITS,CONFORMS,EXTENDS",
+    rels: list[str] | None = None,
     max_nodes: int = 25,
     min_score: float = 0.0,
     max_per_module: int = 3,
     rerank_mode: str = "hybrid",
     rerank_semantic_weight: float = 0.7,
     rerank_lexical_weight: float = 0.3,
-    format: str = "json",
-) -> str:
+    *,
+    ctx: Context,
+) -> dict[str, Any]:
     """
-    Hybrid semantic + structural query over the Swift codebase graph.
+    Hybrid semantic + structural search: ranked Swift nodes and the edges among them.
+
+    Seeds on vector similarity, then expands through the graph. Use ``pack``
+    instead when you want the source itself.
+
+    **rerank_mode:** ``hybrid`` (default) blends vector similarity (70%) with
+    lexical overlap on name, qualname, module and doc-comment (30%);
+    ``semantic`` ranks by vector score only; ``legacy`` orders by hop
+    distance first, for stable comparisons with older results.
 
     :param q: Natural-language query, e.g. "request retry policy".
-    :param k: Number of semantic seed nodes (default 8).
-    :param hop: Graph expansion hops (default 1).
-    :param rels: Comma-separated edge types to follow.
-    :param max_nodes: Maximum nodes to return (default 25).
-    :param min_score: Minimum semantic score for seed inclusion in [0, 1].
-    :param max_per_module: Maximum nodes per module (default 3; 0 disables).
-    :param rerank_mode: 'hybrid' (default), 'semantic', or 'legacy'.
-    :param rerank_semantic_weight: Semantic weight for hybrid mode (default 0.7).
-    :param rerank_lexical_weight: Lexical weight for hybrid mode (default 0.3).
-    :param format: 'json' (default) or 'markdown'.
-    :return: JSON string or Markdown table.
+    :param k: Semantic seed nodes (1-100, default 8).
+    :param hop: Graph expansion hops from each seed (0-5, default 1).
+    :param rels: Edge types to follow; omit for all six (CONTAINS, CALLS,
+        IMPORTS, INHERITS, CONFORMS, EXTENDS).
+    :param max_nodes: Most nodes to return (default 25).
+    :param min_score: Minimum semantic score for a seed, 0.0-1.0.
+    :param max_per_module: Most nodes from one module (default 3; 0 disables).
+    :param rerank_mode: ``hybrid`` (default), ``semantic`` or ``legacy``.
+    :param rerank_semantic_weight: Semantic weight for ``hybrid`` (default 0.7).
+    :param rerank_lexical_weight: Lexical weight for ``hybrid`` (default 0.3).
     """
-    rel_tuple = tuple(r.strip() for r in rels.split(",") if r.strip())
-    result = _get_kg().query(
+    result = kg_from(ctx).query(
         q,
         k=k,
         hop=hop,
-        rels=rel_tuple or DEFAULT_RELS,
+        rels=tuple(rels) if rels else _DEFAULT_RELS,
         max_nodes=max_nodes,
         min_score=min_score,
         max_per_module=max_per_module if max_per_module > 0 else None,
@@ -296,34 +204,14 @@ def query_codebase(
         rerank_semantic_weight=rerank_semantic_weight,
         rerank_lexical_weight=rerank_lexical_weight,
     )
-    data = json.loads(result.to_json())
-
-    if format == "markdown":
-        out: list[str] = [
-            f"## Query Results: `{q}`\n",
-            f"**Seeds:** {data['seeds']}  |  "
-            f"**Expanded:** {data['expanded_nodes']}  |  "
-            f"**Returned:** {data['returned_nodes']}\n",
-            "| Rank | Score | Kind | Name | Module |",
-            "|-----:|------:|------|------|--------|",
-        ]
-        for rank_idx, node in enumerate(data["nodes"], start=1):
-            score = node.get("relevance", {}).get("score", 0.0)
-            kind = node.get("kind", "?")
-            name = node.get("qualname") or node.get("name", "?")
-            module = node.get("module_path", "")
-            out.append(f"| {rank_idx} | {score:.3f} | {kind} | `{name}` | `{module}` |")
-        return "\n".join(out)
-
-    return json.dumps(data, indent=2, ensure_ascii=False)
+    return json.loads(result.to_json())
 
 
-@mcp.tool()
-def pack_snippets(
+def pack(
     q: str,
     k: int = 8,
     hop: int = 1,
-    rels: str = "CONTAINS,CALLS,IMPORTS,INHERITS,CONFORMS,EXTENDS",
+    rels: list[str] | None = None,
     context: int = 5,
     max_lines: int = 60,
     max_nodes: int = 15,
@@ -332,33 +220,33 @@ def pack_snippets(
     rerank_mode: str = "hybrid",
     rerank_semantic_weight: float = 0.7,
     rerank_lexical_weight: float = 0.3,
+    *,
+    ctx: Context,
 ) -> str:
     """
-    Hybrid query + source-grounded Swift snippet extraction.
+    Hybrid search rendered as a Markdown context pack of Swift source with line numbers.
 
-    Returns a Markdown context pack with ranked, deduplicated code snippets
-    and line numbers — ready for direct LLM ingestion.
+    The answer to "how does X work?": ranked, deduplicated snippets ready to
+    read. Same search and ``rerank_mode`` as ``query``.
 
     :param q: Natural-language query, e.g. "request error handling".
-    :param k: Number of semantic seed nodes (default 8).
-    :param hop: Graph expansion hops (default 1).
-    :param rels: Comma-separated edge types to follow.
-    :param context: Extra context lines around each definition (default 5).
-    :param max_lines: Maximum lines per snippet block (default 60).
-    :param max_nodes: Maximum nodes to include in the pack (default 15).
-    :param min_score: Minimum semantic score for seed inclusion in [0, 1].
-    :param max_per_module: Maximum nodes per module (default 3; 0 disables).
-    :param rerank_mode: 'hybrid' (default), 'semantic', or 'legacy'.
-    :param rerank_semantic_weight: Semantic weight for hybrid mode (default 0.7).
-    :param rerank_lexical_weight: Lexical weight for hybrid mode (default 0.3).
-    :return: Markdown string with source-grounded code snippets.
+    :param k: Semantic seed nodes (1-100, default 8).
+    :param hop: Graph expansion hops (0-5, default 1).
+    :param rels: Edge types to follow; omit for all six Swift relations.
+    :param context: Extra lines around each definition (default 5).
+    :param max_lines: Longest snippet, in lines (1-2000, default 60).
+    :param max_nodes: Most snippets (default 15).
+    :param min_score: Minimum semantic score for a seed, 0.0-1.0.
+    :param max_per_module: Most nodes from one module (default 3; 0 disables).
+    :param rerank_mode: ``hybrid`` (default), ``semantic`` or ``legacy``.
+    :param rerank_semantic_weight: Semantic weight for ``hybrid`` (default 0.7).
+    :param rerank_lexical_weight: Lexical weight for ``hybrid`` (default 0.3).
     """
-    rel_tuple = tuple(r.strip() for r in rels.split(",") if r.strip())
-    pack = _get_kg().pack(
+    result = kg_from(ctx).pack(
         q,
         k=k,
         hop=hop,
-        rels=rel_tuple or DEFAULT_RELS,
+        rels=tuple(rels) if rels else _DEFAULT_RELS,
         context=context,
         max_lines=max_lines,
         max_nodes=max_nodes,
@@ -368,15 +256,19 @@ def pack_snippets(
         rerank_semantic_weight=rerank_semantic_weight,
         rerank_lexical_weight=rerank_lexical_weight,
     )
-    return pack.to_markdown()
+    return result.to_markdown()
 
 
-@mcp.tool()
-def callers(node_id: str, rel: str = "CALLS", paths: str = "") -> str:
+# ---------------------------------------------------------------------------
+# SwiftKG's own tools
+# ---------------------------------------------------------------------------
+
+
+def callers(node_id: str, rel: str = "CALLS", paths: str = "", *, ctx: Context) -> str:
     """
     Return all nodes that call a given node, resolving through ``sym:`` stubs.
 
-    Unlike ``query_codebase`` (which seeds on semantics and expands outward),
+    Unlike ``query`` (which seeds on semantics and expands outward),
     this tool performs a precise reverse lookup: it finds every caller of the
     specified node, including cross-module callers that reference it via an
     import alias recorded as a ``sym:`` stub.
@@ -404,7 +296,7 @@ def callers(node_id: str, rel: str = "CALLS", paths: str = "") -> str:
     :return: JSON with ``node_id``, ``rel``, ``caller_count``, and
              ``callers`` list of node dicts.
     """
-    caller_list = _get_kg().callers(node_id, rel=rel)
+    caller_list = kg_from(ctx).callers(node_id, rel=rel)
     if paths:
         path_prefixes = [p.strip() for p in paths.split(",") if p.strip()]
         caller_list = [
@@ -424,8 +316,7 @@ def callers(node_id: str, rel: str = "CALLS", paths: str = "") -> str:
     )
 
 
-@mcp.tool()
-def type_hierarchy(node_id: str) -> str:
+def type_hierarchy(node_id: str, *, ctx: Context) -> str:
     """
     Return everything the graph knows about one Swift type's relationships.
 
@@ -458,7 +349,7 @@ def type_hierarchy(node_id: str) -> str:
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 
-    kg = _get_kg()
+    kg = kg_from(ctx)
     node = kg.node(node_id)
     if node is None:
         return json.dumps({"error": f"Node not found: {node_id}"}, indent=2)
@@ -492,8 +383,7 @@ def type_hierarchy(node_id: str) -> str:
     )
 
 
-@mcp.tool()
-def public_api(module_path: str = "", limit: int = 100) -> str:
+def public_api(module_path: str = "", limit: int = 100, *, ctx: Context) -> str:
     """
     List the declared public API surface.
 
@@ -513,7 +403,7 @@ def public_api(module_path: str = "", limit: int = 100) -> str:
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 
-    con = _get_kg().store.con
+    con = kg_from(ctx).store.con
     sql = """
         SELECT id, kind, name, qualname, module_path, docstring,
                json_extract(metadata, '$.visibility') AS visibility
@@ -546,132 +436,12 @@ def public_api(module_path: str = "", limit: int = 100) -> str:
     )
 
 
-@mcp.tool()
-def get_node(node_id: str, include_edges: bool = False) -> str:
-    """
-    Fetch a single Swift node by its stable ID and render as Markdown.
-
-    Node IDs follow the pattern ``<kind>:<module_path>:<qualname>``, e.g.
-    ``cls:Sources/Networking/Client.swift:HTTPClient`` or
-    ``meth:Sources/Networking/Client.swift:HTTPClient.send``.
-
-    :param node_id: Stable node identifier.
-    :param include_edges: If True, append outgoing edges and incoming callers.
-    :return: Markdown-formatted node summary.
-    """
-    kg = _get_kg()
-    node = kg.node(node_id)
-    if node is None:
-        return f"## Node Not Found\n\nNode ID `{node_id}` does not exist in the knowledge graph."
-
-    kind = node.get("kind", "unknown")
-    name = node.get("qualname") or node.get("name", "unknown")
-    out: list[str] = [f"## `{name}` ({kind})\n"]
-
-    module = node.get("module_path", "")
-    lineno = node.get("lineno")
-    end_lineno = node.get("end_lineno")
-    if module:
-        out.append(f"- **Module:** `{module}`")
-    if lineno is not None:
-        loc = f"line {lineno}"
-        if end_lineno:
-            loc += f"–{end_lineno}"
-        out.append(f"- **Location:** {loc}")
-    out.append(f"- **ID:** `{node_id}`")
-    out.append("")
-
-    docstring = node.get("docstring", "").strip()
-    if docstring:
-        out.append("### doc-comment\n")
-        out.append(docstring)
-        out.append("")
-
-    if not include_edges:
-        return "\n".join(out)
-
-    store = getattr(kg, "_store", None)
-    if store is not None:
-        for rel in ("CALLS", "CONTAINS", "IMPORTS", "INHERITS", "CONFORMS", "EXTENDS"):
-            edges = store.edges_from(node_id, rel=rel)
-            visible = [e for e in edges if not e["dst"].startswith("sym:")] if edges else []
-            if visible:
-                out.append(f"### Outgoing {rel}\n")
-                for e in visible:
-                    out.append(f"- `{e['dst']}`")
-                out.append("")
-
-    try:
-        caller_nodes = kg.callers(node_id, rel="CALLS")
-        if caller_nodes:
-            out.append("### Incoming Calls\n")
-            for c in caller_nodes:
-                cname = c.get("qualname") or c.get("name", "")
-                cmod = c.get("module_path", "")
-                cline = c.get("lineno")
-                cid = c.get("id", "")
-                loc_str = f" (line {cline})" if cline else ""
-                out.append(f"- `{cid}` — `{cname}` in `{cmod}`{loc_str}")
-            out.append("")
-    except (AttributeError, ValueError, RuntimeError):
-        pass
-
-    return "\n".join(out)
-
-
-@mcp.tool()
-def graph_stats() -> str:
-    """
-    Return node and edge counts by kind and relation as Markdown.
-
-    Call this first when engaging with a new Swift repo.
-    Reports doc-comment coverage (fraction of functions/methods with doc-comment comments).
-
-    :return: Markdown summary with total counts, nodes-by-kind, and edges-by-relation tables.
-    """
-    stats = _get_kg().stats()
-    out: list[str] = ["## SwiftKG Graph Statistics\n"]
-    out.append(f"- **Database:** `{stats.get('db_path', '')}`")
-    out.append(f"- **Total nodes:** {stats.get('total_nodes', 0):,}")
-    out.append(
-        f"- **Meaningful nodes:** {stats.get('meaningful_nodes', 0):,} *(excludes sym: stubs)*"
-    )
-    out.append(f"- **Total edges:** {stats.get('total_edges', 0):,}")
-    cov = stats.get("docstring_coverage")
-    if cov is not None:
-        out.append(f"- **doc-comment coverage:** {cov:.1%} *(functions + methods)*")
-    out.append("")
-
-    node_counts: dict = stats.get("node_counts", {})
-    if node_counts:
-        out.append("### Nodes by Kind\n")
-        out.append("| Kind | Count |")
-        out.append("|------|------:|")
-        for kind, count in sorted(node_counts.items(), key=lambda x: -x[1]):
-            out.append(f"| {kind} | {count:,} |")
-        out.append("")
-
-    edge_counts: dict = stats.get("edge_counts", {})
-    if edge_counts:
-        out.append("### Edges by Relation\n")
-        out.append("| Relation | Count |")
-        out.append("|----------|------:|")
-        for rel, count in sorted(edge_counts.items(), key=lambda x: -x[1]):
-            out.append(f"| {rel} | {count:,} |")
-        out.append("")
-
-    out.append(
-        "> `sym:` nodes are import stub placeholders for external packages — "
-        "they are not local code entities."
-    )
-    return "\n".join(out)
-
-
-@mcp.tool()
 def list_nodes(
     module_path: str = "",
     kind: str = "",
     limit: int = 500,
+    *,
+    ctx: Context,
 ) -> str:
     """
     List nodes filtered by module path prefix and/or kind.
@@ -686,10 +456,8 @@ def list_nodes(
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 
-    kg = _get_kg()
-    store = getattr(kg, "_store", None)
-    if not store:
-        return json.dumps({"error": "No database store available."}, indent=2)
+    kg = kg_from(ctx)
+    store = kg.store
 
     q = "SELECT id, name, qualname, kind, module_path, lineno, docstring FROM nodes WHERE 1=1"
     q += " AND id NOT LIKE 'sym:%'"
@@ -728,8 +496,7 @@ def list_nodes(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp.tool()
-def find_node(name: str, kind: str = "", limit: int = 100) -> str:
+def find_node(name: str, kind: str = "", limit: int = 100, *, ctx: Context) -> str:
     """
     Find graph nodes by name without knowing their full stable ID.
 
@@ -746,10 +513,8 @@ def find_node(name: str, kind: str = "", limit: int = 100) -> str:
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 
-    kg = _get_kg()
-    store = getattr(kg, "_store", None)
-    if not store:
-        return json.dumps({"error": "No database store available."}, indent=2)
+    kg = kg_from(ctx)
+    store = kg.store
 
     name_lower = name.lower()
     q = (
@@ -787,11 +552,12 @@ def find_node(name: str, kind: str = "", limit: int = 100) -> str:
         return json.dumps({"error": str(e)}, indent=2)
 
 
-@mcp.tool()
 def centrality(
     top: int = 20,
     kinds: str = "",
     group_by: str = "node",
+    *,
+    ctx: Context,
 ) -> str:
     """
     Compute Structural Importance Ranking (SIR) for the indexed codebase.
@@ -830,7 +596,7 @@ def centrality(
             aggregate_module_scores,
         )
 
-        db_path = _get_kg().db_path
+        db_path = kg_from(ctx).db_path
         ranker = StructuralImportanceRanker(db_path)
         all_records = ranker.compute()
     except Exception as e:  # noqa: BLE001
@@ -874,10 +640,11 @@ def centrality(
     return "\n".join(out)
 
 
-@mcp.tool()
 def bridge_centrality(
     top: int = 20,
     include_imports: bool = True,
+    *,
+    ctx: Context,
 ) -> str:
     """
     Compute module connectivity: how many unique modules each module interacts with.
@@ -899,7 +666,7 @@ def bridge_centrality(
     try:
         from swift_kg.bridge import compute_bridge_centrality  # noqa: PLC0415
 
-        db_path = str(_get_kg().db_path)
+        db_path = str(kg_from(ctx).db_path)
         modules = compute_bridge_centrality(
             kind="module",
             include_imports=include_imports,
@@ -924,8 +691,7 @@ def bridge_centrality(
     return "\n".join(out)
 
 
-@mcp.tool()
-def framework_nodes(top: int = 20) -> str:
+def framework_nodes(top: int = 20, *, ctx: Context) -> str:
     """
     Identify framework-like (hub) modules using SIR + module connectivity.
 
@@ -950,7 +716,7 @@ def framework_nodes(top: int = 20) -> str:
         from swift_kg.centrality import StructuralImportanceRanker  # noqa: PLC0415
         from swift_kg.framework_detector import detect_framework_nodes  # noqa: PLC0415
 
-        kg = _get_kg()
+        kg = kg_from(ctx)
         db_path = str(kg.db_path)
 
         # Compute and persist SIR scores (structural importance)
@@ -986,8 +752,7 @@ def framework_nodes(top: int = 20) -> str:
     return "\n".join(out)
 
 
-@mcp.tool()
-def find_definition_at(file: str, line: int) -> str:
+def find_definition_at(file: str, line: int, *, ctx: Context) -> str:
     """
     Find the code node whose definition spans a given file location.
 
@@ -1011,7 +776,7 @@ def find_definition_at(file: str, line: int) -> str:
     except ValueError as exc:
         return f"## Invalid Argument\n\n{exc}"
 
-    kg = _get_kg()
+    kg = kg_from(ctx)
     store = getattr(kg, "_store", None) or getattr(kg, "store", None)
     if store is None:
         return "## Error\n\nNo graph store available."
@@ -1047,17 +812,16 @@ def find_definition_at(file: str, line: int) -> str:
                 f"No function, method, type, extension or property spans "
                 f"`{file}:{line}` in the graph.\n\n"
                 "Check that the file path matches the module path stored in the graph "
-                "(use `graph_stats()` or `list_nodes()` to browse available modules)."
+                "(use `stats()` or `list_nodes()` to browse available modules)."
             )
         node_id = mod_rows[0][0]
     else:
         node_id = rows[0][0]
 
-    return explain(node_id)
+    return explain(node_id, ctx=ctx)
 
 
-@mcp.tool()
-def analyze_repo() -> str:
+def analyze_repo(*, ctx: Context) -> str:
     """
     Run a full structural analysis of the indexed Swift repository.
 
@@ -1072,26 +836,25 @@ def analyze_repo() -> str:
 
     from rich.console import Console  # noqa: PLC0415
 
-    from swift_kg.kg import _render_analysis  # noqa: PLC0415
+    from swift_kg.kg import render_analysis  # noqa: PLC0415
     from swift_kg.swiftkg_thorough_analysis import SwiftKGAnalyzer  # noqa: PLC0415
 
     # Silence Rich output — stdout carries the MCP protocol on stdio transport.
     silent = Console(file=StringIO(), highlight=False)
-    kg = _get_kg()
+    kg = kg_from(ctx)
     try:
-        analyzer = SwiftKGAnalyzer(kg, console=silent, snapshot_mgr=_snapshot_mgr)
+        analyzer = SwiftKGAnalyzer(kg, console=silent, snapshot_mgr=_snapshots(kg))
         analyzer.run_analysis()
         return analyzer.to_markdown()
     except Exception as exc:  # noqa: BLE001
         # Lightweight stats-only fallback — never re-runs the noisy analyzer.
         try:
-            return _render_analysis(str(kg.repo_root), kg.store.stats())
+            return render_analysis(str(kg.repo_root), kg.store.stats())
         except Exception:  # noqa: BLE001
             return f"# SwiftKG Analysis\n\nAnalysis failed: {exc}\n"
 
 
-@mcp.tool()
-def explain(node_id: str, limit: int = 10) -> str:
+def explain(node_id: str, limit: int = 10, *, ctx: Context) -> str:
     """
     Return a natural-language explanation of a code node.
 
@@ -1105,7 +868,7 @@ def explain(node_id: str, limit: int = 10) -> str:
     - **Documentation**: Full doc-comment if available
 
     This is ideal for understanding the role and context of a specific node
-    without needing to read the full source code. Use ``pack_snippets()``
+    without needing to read the full source code. Use ``pack()``
     to then retrieve the actual implementation.
 
     :param node_id: Stable node identifier, e.g.
@@ -1126,19 +889,20 @@ def explain(node_id: str, limit: int = 10) -> str:
         return f"## Invalid Argument\n\n{exc}"
 
     return render_explain(
-        _get_kg(),
+        kg_from(ctx),
         node_id,
         limit=limit,
-        snippets_hint="pack_snippets()",
+        snippets_hint="pack()",
     )
 
 
-@mcp.tool()
 def rank_nodes(
     top: int = 25,
     rels: str = "CALLS,IMPORTS,INHERITS,CONFORMS,EXTENDS",
     persist_metric: str = "",
     exclude_tests: bool = True,
+    *,
+    ctx: Context,
 ) -> str:
     """
     Compute global weighted CodeRank (PageRank) over the repository graph.
@@ -1172,7 +936,7 @@ def rank_nodes(
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 
-    db_path = str(_get_kg().db_path)
+    db_path = str(kg_from(ctx).db_path)
     rel_list = [r.strip() for r in rels.split(",") if r.strip()]
 
     try:
@@ -1217,7 +981,6 @@ def rank_nodes(
     return json.dumps(results, indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
 def query_ranked(
     q: str,
     k: int = 8,
@@ -1226,6 +989,8 @@ def query_ranked(
     rels: str = "CALLS,IMPORTS,INHERITS,CONFORMS,EXTENDS",
     radius: int = 2,
     exclude_tests: bool = True,
+    *,
+    ctx: Context,
 ) -> str:
     """
     Rank query results using CodeRank-enhanced hybrid or personalized PageRank.
@@ -1257,7 +1022,7 @@ def query_ranked(
         rank_query_ppr,
     )
 
-    kg = _get_kg()
+    kg = kg_from(ctx)
     db_path = str(kg.db_path)
     rel_list = [r.strip() for r in rels.split(",") if r.strip()]
 
@@ -1324,8 +1089,7 @@ def query_ranked(
     )
 
 
-@mcp.tool()
-def explain_rank(node_id: str, q: str = "") -> str:
+def explain_rank(node_id: str, q: str = "", *, ctx: Context) -> str:
     """
     Explain the CodeRank score components for a specific node.
 
@@ -1352,7 +1116,7 @@ def explain_rank(node_id: str, q: str = "") -> str:
     except ValueError as exc:
         return f"## Invalid Argument\n\n{exc}"
 
-    kg = _get_kg()
+    kg = kg_from(ctx)
     db_path = str(kg.db_path)
 
     node = kg.node(node_id)
@@ -1459,8 +1223,7 @@ def explain_rank(node_id: str, q: str = "") -> str:
     return "\n".join(out)
 
 
-@mcp.tool()
-def snapshot_list(limit: int = 10, branch: str = "") -> str:
+def snapshot_list(limit: int = 10, branch: str = "", *, ctx: Context) -> str:
     """
     List saved temporal snapshots of codebase metrics in reverse chronological order.
 
@@ -1484,19 +1247,18 @@ def snapshot_list(limit: int = 10, branch: str = "") -> str:
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 
-    mgr = _get_snapshot_mgr()
+    mgr = _snapshots(kg_from(ctx))
     snapshots = mgr.list_snapshots(
         limit=limit if limit > 0 else None,
         branch=branch if branch else None,
     )
     for snap in snapshots:
         snap_metrics = snap.get("metrics", {})
-        snap["freshness"] = _snapshot_freshness(snap_metrics.get("total_nodes", 0))
+        snap["freshness"] = _snapshot_freshness(kg_from(ctx), snap_metrics.get("total_nodes", 0))
     return json.dumps(snapshots, indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
-def snapshot_show(key: str = "latest") -> str:
+def snapshot_show(key: str = "latest", *, ctx: Context) -> str:
     """
     Show full details of a specific codebase metrics snapshot.
 
@@ -1516,7 +1278,7 @@ def snapshot_show(key: str = "latest") -> str:
     :return: JSON object with full snapshot details, or an error dict if
              the requested snapshot does not exist.
     """
-    mgr = _get_snapshot_mgr()
+    mgr = _snapshots(kg_from(ctx))
 
     if key == "latest":
         entries = mgr.list_snapshots(limit=1)
@@ -1528,12 +1290,11 @@ def snapshot_show(key: str = "latest") -> str:
     if snapshot is None:
         return json.dumps({"error": f"Snapshot not found for key: {key!r}"})
     out = snapshot.to_dict()
-    out["freshness"] = _snapshot_freshness(snapshot.metrics.get("total_nodes", 0))
+    out["freshness"] = _snapshot_freshness(kg_from(ctx), snapshot.metrics.get("total_nodes", 0))
     return json.dumps(out, indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
-def snapshot_diff(key_a: str, key_b: str) -> str:
+def snapshot_diff(key_a: str, key_b: str, *, ctx: Context) -> str:
     """
     Compare two codebase metric snapshots side-by-side.
 
@@ -1558,80 +1319,82 @@ def snapshot_diff(key_a: str, key_b: str) -> str:
              ``node_counts_delta``, and ``edge_counts_delta``. Returns an
              error dict if either snapshot is missing.
     """
-    mgr = _get_snapshot_mgr()
+    mgr = _snapshots(kg_from(ctx))
     result = mgr.diff_snapshots(key_a, key_b)
     if "error" not in result:
         result["freshness"] = {
-            "a": _snapshot_freshness(result.get("a", {}).get("metrics", {}).get("total_nodes", 0)),
-            "b": _snapshot_freshness(result.get("b", {}).get("metrics", {}).get("total_nodes", 0)),
+            "a": _snapshot_freshness(
+                kg_from(ctx), result.get("a", {}).get("metrics", {}).get("total_nodes", 0)
+            ),
+            "b": _snapshot_freshness(
+                kg_from(ctx), result.get("b", {}).get("metrics", {}).get("total_nodes", 0)
+            ),
         }
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
+#: SwiftKG's own tools, registered after the canonical set in this order.
+EXTRA_TOOLS = (
+    callers,
+    type_hierarchy,
+    public_api,
+    list_nodes,
+    find_node,
+    centrality,
+    bridge_centrality,
+    framework_nodes,
+    find_definition_at,
+    analyze_repo,
+    explain,
+    rank_nodes,
+    query_ranked,
+    explain_rank,
+    snapshot_list,
+    snapshot_show,
+    snapshot_diff,
+)
 
 
-def _parse_args(argv: list | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        prog="swiftkg-mcp",
-        description="SwiftKG MCP server — exposes Swift codebase query tools to AI agents.",
+def build_server(
+    repo: str | Path,
+    db: str | Path | None = None,
+    vectors: str | Path | None = None,
+    model: str | None = None,
+) -> KGServer:
+    """Build the SwiftKG MCP server for one repository, without opening its graph.
+
+    :param repo: Repository root the graph was built from.
+    :param db: Graph database; ``None`` for ``<repo>/.swiftkg/graph.sqlite``.
+    :param vectors: Vector store; ``None`` for ``<repo>/.swiftkg/vectors.sqlite``.
+    :param model: Embedding model; ``None`` for :data:`DEFAULT_MODEL`.
+    :return: The server; serve it with :func:`kg_utils.mcp.run`.
+    """
+    root = Path(repo).resolve()
+
+    def open_kg() -> SwiftKG:
+        return SwiftKG(root, db, vectors, model=model or DEFAULT_MODEL)
+
+    server = make_server(
+        open_kg, name="swiftkg", kind="code", version=__version__, instructions=PREAMBLE
     )
-    p.add_argument("--repo", default=".", help="Repository root directory (default: .)")
-    p.add_argument(
-        "--db",
-        default=".swiftkg/graph.sqlite",
-        help="Path to the SQLite knowledge graph",
-    )
-    p.add_argument(
-        "--vectors",
-        default=".swiftkg/vectors.sqlite",
-        help="Path to the sqlite-vec vector store",
-    )
-    p.add_argument(
-        "--model",
-        default=DEFAULT_MODEL,
-        help=f"Sentence-transformer model name (default: {DEFAULT_MODEL})",
-    )
-    p.add_argument(
-        "--transport",
-        choices=["stdio", "sse"],
-        default="stdio",
-        help="MCP transport: stdio (default) or sse (HTTP)",
-    )
-    return p.parse_args(argv)
+    server.canonical("query")(query)
+    server.canonical("pack")(pack)
+    for tool in EXTRA_TOOLS:
+        server.add_tool(tool)
+    return server
 
 
-def main(argv: list | None = None) -> None:
-    """CLI entry point for the SwiftKG MCP server."""
-    global _kg, _snapshot_mgr
+def main(argv: list[str] | None = None) -> None:
+    """Entry point for ``swiftkg-mcp``: the same command as ``swiftkg mcp``.
 
-    args = _parse_args(argv)
+    Kept as a console script because Claude Desktop and Copilot configs name
+    it; it runs the standard command, so both spellings take the same flags.
 
-    repo = Path(args.repo).resolve()
-    db = Path(args.db) if Path(args.db).is_absolute() else repo / args.db
-    vectors = Path(args.vectors) if Path(args.vectors).is_absolute() else repo / args.vectors
+    :param argv: Arguments; ``None`` for ``sys.argv[1:]``.
+    """
+    from swift_kg.cli.main import mcp_command  # noqa: PLC0415
 
-    if not db.exists():
-        print(
-            f"WARNING: SQLite database not found at '{db}'.\nRun 'swiftkg build --repo .' first.",
-            file=sys.stderr,
-        )
-
-    print(
-        f"SwiftKG MCP server starting\n"
-        f"  repo     : {repo}\n"
-        f"  db       : {db}\n"
-        f"  vectors  : {vectors}\n"
-        f"  model    : {args.model}\n"
-        f"  transport: {args.transport}",
-        file=sys.stderr,
-    )
-
-    _kg = SwiftKG(repo_root=repo, db_path=db, vectors_path=vectors, model=args.model)
-    _snapshot_mgr = SnapshotManager(repo / ".swiftkg" / "snapshots", db_path=db)
-    mcp.run(transport=args.transport)
+    mcp_command.main(args=argv, prog_name="swiftkg-mcp")
 
 
 if __name__ == "__main__":

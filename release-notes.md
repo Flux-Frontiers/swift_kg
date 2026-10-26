@@ -1,42 +1,44 @@
-# Release Notes -- v0.4.0
+# Release Notes -- v0.5.0
 
-> Released: 2026-09-29
+> Released: 2026-10-26
 
-A validation release. SwiftKG no longer carries its own copies of the input
-validators and uses the ones in `kgmodule-utils` instead. Extraction,
-resolution, the graph schema and the MCP tool surface are unchanged and no
-index needs rebuilding. One behavior changes at the edges: integer arguments
-are now checked more strictly, so a bool or a fractional float is rejected
-where it used to be silently coerced.
+SwiftKG's MCP server now runs on the fleet's shared base, `kg_utils.mcp`, so
+its first five tools have the same names on every fleet KG server: `stats`,
+`query`, `pack`, `get_node` and `neighbors`. Its 17 domain tools, including
+`type_hierarchy` and `public_api`, keep their names. Tool names, some
+arguments and the shape of `stats()` change, so read Upgrading before you
+install.
 
 ## What changed
 
-**The local validators are gone.** `bounded_int` and `require_query` lived in
-`swift_kg.validation` as copies of the SDK's helpers. They are deleted, and the
-callers import them from `kg_utils.validation`. The module keeps only what is
-specific to Swift: `MAX_QUERY_LEN`, `normalize_node_id` and `known_prefix`.
+**Canonical tool names.** `graph_stats` is `stats`, `query_codebase` is
+`query`, `pack_snippets` is `pack`, and `get_node(include_edges=True)` is
+`get_node` followed by the new `neighbors`. There are no aliases. `query` and
+`pack` keep SwiftKG's hybrid reranking and per-module cap, and when `rels` is
+omitted they follow all six Swift relations.
 
-**The `query()` override is deleted.** It existed only to validate its
-arguments. The base class now bounds `q`, `k`, `hop` and `max_nodes` in both
-`query()` and `pack()`, and SwiftKG sets its 500-character query cap through
-the `max_query_len` class attribute. `pack()` keeps an override for one reason:
-it bounds `max_lines`, which the SDK does not check.
+**One command, standard flags.** `swiftkg mcp` and `swiftkg-mcp` are the same
+command, with `--repo`, `--db`, `--vectors`, `--model`,
+`--transport stdio|streamable-http`, `--host`, `--port` and `--manifest`. The
+graph opens per session and closes after, and a repository with no graph is
+refused instead of served empty. The server's instructions are generated from
+the tools' docstrings.
 
-**Stricter integer checks.** The SDK's `bounded_int` rejects a bool and a
-non-integral float. The old local copy accepted both, so `k=True` was treated
-as 1 and `k=3.7` as 3. Both now raise `ValueError`. This is the reason for the
-minor version bump.
+**Statistics in the fleet shape.** `SwiftKG.stats()` returns `kind`, `nodes`
+(`total`, `by_kind`) and `edges` (`total`, `by_rel`), plus the module's own
+measures. Snapshots keep their flat keys.
 
-**`kgmodule-utils` floor raised to `>=0.26.0`,** the latest release. The lock
-moves from 0.23.0 to 0.26.0 and changes only fleet packages.
+**Fixed:** `analyze_repo` failed on every call, and `list_nodes` and
+`find_node` answered "No database store available" as a session's first call.
+All three work now.
 
 ## Upgrading
 
-If you call the Python API or MCP tools with well-formed integers, nothing
-changes. If any caller passes a bool or a float with a fractional part for
-`k`, `hop`, `max_nodes` or `max_lines`, change it to an int; it will now raise
-`ValueError`. No data migration, rebuild or configuration change is needed.
-`pip install --upgrade swift-kg` is enough.
+Rename the tools in agent instructions and scripts, pass `rels` as a list,
+and drop `format="markdown"` from `query` calls and `--transport sse` from
+configs. Code that read `stats()["total_nodes"]` reads `["nodes"]["total"]`
+instead. swift-kg now needs kgmodule-utils 0.29.0, whose `[mcp]` extra brings
+the MCP SDK.
 
 ---
 

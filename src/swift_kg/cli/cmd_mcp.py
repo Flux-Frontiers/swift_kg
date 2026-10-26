@@ -1,35 +1,35 @@
 """
-cli/cmd_mcp.py — swiftkg mcp command: launch the MCP server.
+cli/cmd_mcp.py -- the server builder behind ``swiftkg mcp``.
+
+``swiftkg mcp`` is the fleet's standard MCP command, from :mod:`kg_utils.mcp`,
+registered on the group in :mod:`swift_kg.cli.main`::
+
+    swiftkg mcp [--repo DIR] [--db FILE] [--vectors FILE] [--model NAME]
+                [--transport stdio|streamable-http] [--host H] [--port N]
+                [--manifest]
+
+Neither this module nor registering the command imports ``mcp`` or the
+server module, so every other ``swiftkg`` command starts as fast as before.
 """
 
 from __future__ import annotations
 
-import click
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kg_utils.mcp import KGServer
 
 
-@click.command("mcp")
-@click.option("--repo", default=".", show_default=True, help="Repository root.")
-@click.option(
-    "--db",
-    default=".swiftkg/graph.sqlite",
-    show_default=True,
-    help="SQLite database path.",
-)
-@click.option(
-    "--vectors",
-    default=".swiftkg/vectors.sqlite",
-    show_default=True,
-    help="sqlite-vec store path.",
-)
-@click.option(
-    "--transport",
-    default="stdio",
-    show_default=True,
-    type=click.Choice(["stdio", "sse"]),
-    help="MCP transport.",
-)
-def mcp_cmd(repo: str, db: str, vectors: str, transport: str) -> None:
-    """Launch the SwiftKG MCP server."""
-    from swift_kg.mcp_server import main  # pylint: disable=import-outside-toplevel
+def build_server(repo: Path, db: Path | None, vectors: Path | None, model: str | None) -> KGServer:
+    """Build the SwiftKG server; the server module is imported only here.
 
-    main(["--repo", repo, "--db", db, "--vectors", vectors, "--transport", transport])
+    :param repo: Repository root.
+    :param db: Graph database, or ``None`` for the default under ``repo``.
+    :param vectors: Vector store, or ``None`` for the default under ``repo``.
+    :param model: Embedding model, or ``None`` for the default.
+    :return: The server, with the graph not yet opened.
+    """
+    from swift_kg.mcp_server import build_server as _build  # noqa: PLC0415
+
+    return _build(repo, db, vectors, model)

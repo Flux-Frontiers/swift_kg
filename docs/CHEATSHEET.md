@@ -53,7 +53,8 @@ The hook is opt-in per commit: `SWIFTKG_SNAPSHOT=1 git commit …`, and
 
 ```bash
 swiftkg mcp --repo REPO                    # stdio (default)
-swiftkg mcp --repo REPO --transport sse
+swiftkg mcp --repo REPO --transport streamable-http --port 8765
+swiftkg mcp --repo REPO --manifest         # tool list as JSON, no graph needed
 ```
 
 ## Node IDs

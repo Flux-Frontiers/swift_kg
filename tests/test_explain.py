@@ -139,4 +139,4 @@ class TestSnippetHint:
         node_id = "fn:Sources/App/File.swift:doThing"
         kg = FakeKG({node_id: _node(node_id, "function", "doThing")})
         assert "swiftkg pack" in render_explain(kg, node_id, snippets_hint="swiftkg pack")
-        assert "pack_snippets()" in render_explain(kg, node_id)
+        assert "pack()" in render_explain(kg, node_id)

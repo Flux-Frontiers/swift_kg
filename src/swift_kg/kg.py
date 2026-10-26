@@ -93,7 +93,7 @@ class SwiftKG(KGModule):
 
     _default_dir = ".swiftkg"
     #: Tighter than the SDK default, because the MCP server can take queries
-    #: over SSE; the base class applies it in query() and pack().
+    #: over streamable HTTP; the base class applies it in query() and pack().
     max_query_len = MAX_QUERY_LEN
 
     def __init__(
@@ -198,6 +198,27 @@ class SwiftKG(KGModule):
         :raises ValueError: If the ID is empty or over-long.
         """
         return super().node(normalize_node_id(node_id))
+
+    def neighbors(
+        self,
+        node_id: str,
+        *,
+        rels: tuple[str, ...] | list[str] | None = None,
+        direction: str = "both",
+        limit: int = 50,
+    ) -> dict[str, Any] | None:
+        """Return a node's one-hop neighborhood, accepting the ID forms :meth:`node` does.
+
+        :param node_id: Node ID, optionally wrapped in backticks or quotes.
+        :param rels: Relation types to follow, or ``None`` for all of them.
+        :param direction: ``"out"``, ``"in"`` or ``"both"``.
+        :param limit: Maximum number of edges.
+        :return: ``{"node", "edges", "nodes"}``, or ``None`` if not found.
+        :raises ValueError: If the ID is empty or over-long, or an option is out of range.
+        """
+        return super().neighbors(
+            normalize_node_id(node_id), rels=rels, direction=direction, limit=limit
+        )
 
     def callers(self, node_id: str, *, rel: str = "CALLS") -> list[dict[str, Any]]:
         """Return all nodes referencing ``node_id`` through ``rel``.
