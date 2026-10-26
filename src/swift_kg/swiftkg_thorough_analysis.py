@@ -44,6 +44,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from kg_utils.stats import flat_stats
 from kg_utils.vector_backend import VectorStoreNotFoundError
 from rich.console import Console
 
@@ -377,7 +378,8 @@ class SwiftKGAnalyzer:
     def _analyze_baseline(self) -> None:
         """Phase 1: Establish baseline node and edge counts."""
         try:
-            self.stats = self.kg.stats()
+            # The report reads the store's flat keys (total_nodes, node_counts, ...).
+            self.stats = flat_stats(self.kg.stats())
             n = self.stats.get("total_nodes", "?")
             e = self.stats.get("total_edges", "?")
             self._phase_result = f"nodes={n}  edges={e}"

@@ -415,7 +415,7 @@ def rank_query_hybrid(
 ) -> list[RankResult]:
     """Hybrid rank for a query using semantic scores + global centrality + proximity."""
     # `radius` drives the induced-subgraph walk and `top_k` the result size;
-    # both arrive from the query_ranked MCP tool, which is reachable over SSE
+    # both arrive from the query_ranked MCP tool, which is reachable over HTTP
     # (FLEET_STANDARDS, settled 2026-08-24).
     radius = bounded_int("radius", radius, 0, 5)
     top_k = bounded_int("top", top_k, 1, 1000)
@@ -446,7 +446,7 @@ def rank_query_ppr(
 ) -> list[RankResult]:
     """Rank query results using personalized PageRank on a query-induced subgraph."""
     # `radius` drives the induced-subgraph walk and `top_k` the result size;
-    # both arrive from the query_ranked MCP tool, which is reachable over SSE
+    # both arrive from the query_ranked MCP tool, which is reachable over HTTP
     # (FLEET_STANDARDS, settled 2026-08-24).
     radius = bounded_int("radius", radius, 0, 5)
     top_k = bounded_int("top", top_k, 1, 1000)

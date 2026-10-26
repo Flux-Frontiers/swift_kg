@@ -1,8 +1,8 @@
 """
 test_validation.py — boundary validation for SwiftKG's public entry points.
 
-The MCP server supports the SSE transport beyond a trusted local environment,
-so these are real external inputs rather than CLI ergonomics.
+The MCP server supports the streamable HTTP transport beyond a trusted local
+environment, so these are real external inputs rather than CLI ergonomics.
 """
 
 from __future__ import annotations

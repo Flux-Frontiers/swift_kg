@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from kg_utils.stats import stats_problems
 
 from swift_kg.extractor import _HAS_TREE_SITTER
 from swift_kg.kg import SwiftKG
@@ -44,23 +45,26 @@ def _id(kg: SwiftKG, qualname: str) -> str:
 class TestBuild:
     def test_graph_is_populated(self, kg: SwiftKG) -> None:
         stats = kg.stats()
-        assert stats["total_nodes"] > 0
-        assert stats["total_edges"] > 0
+        assert stats_problems(stats) == []
+        assert stats["kind"] == "code"
+        assert stats["nodes"]["total"] > 0
+        assert stats["edges"]["total"] > 0
+        assert "meaningful_nodes" in stats  # a domain measure, kept as an extra
 
     def test_every_swift_kind_is_stored(self, kg: SwiftKG) -> None:
-        counts = kg.stats()["node_counts"]
+        counts = kg.stats()["nodes"]["by_kind"]
         for kind in ("class", "struct", "enum", "protocol", "actor", "extension"):
             assert counts.get(kind, 0) > 0, f"no {kind} nodes were stored"
 
     def test_conformance_and_inheritance_are_separate_relations(self, kg: SwiftKG) -> None:
-        counts = kg.stats()["edge_counts"]
+        counts = kg.stats()["edges"]["by_rel"]
         assert counts.get("CONFORMS", 0) > 0
         assert counts.get("INHERITS", 0) > 0
 
     def test_rebuild_is_idempotent(self, kg: SwiftKG) -> None:
-        before = kg.stats()["total_nodes"]
+        before = kg.stats()["nodes"]["total"]
         kg.build_graph(wipe=True)
-        assert kg.stats()["total_nodes"] == before
+        assert kg.stats()["nodes"]["total"] == before
 
     def test_kind_is_code(self, kg: SwiftKG) -> None:
         assert kg.kind() == "code"

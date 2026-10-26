@@ -6,9 +6,9 @@ Per FLEET_STANDARDS (settled 2026-08-24), a KGModule validates once, in
 the CLI and the MCP server. Both funnel through those methods, so one set
 of checks covers both surfaces and there is nothing to drift.
 
-This matters more than CLI ergonomics: the MCP server supports the SSE
-transport beyond a trusted local environment, so these are real external
-inputs. An unbounded ``hop`` drives an unbounded graph walk.
+This matters more than CLI ergonomics: the MCP server supports the
+streamable HTTP transport beyond a trusted local environment, so these are
+real external inputs. An unbounded ``hop`` drives an unbounded graph walk.
 
 The generic checks, ``bounded_int`` and ``require_query``, come from
 ``kg_utils.validation``, and the base class applies them in ``query()`` and

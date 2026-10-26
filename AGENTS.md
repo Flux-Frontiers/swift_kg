@@ -46,13 +46,14 @@ Always use these first — they are faster and source-grounded.
 
 | Tool | Purpose |
 |------|---------|
-| `graph_stats` | Node/edge counts by kind and relation |
-| `query_codebase(q, k, hop, rels, …)` | Hybrid semantic + structural query |
-| `pack_snippets(q, k, hop, …)` | Source-grounded snippet packs |
+| `stats` | Node/edge counts by kind and relation (fleet stats shape) |
+| `query(q, k, hop, rels, ...)` | Hybrid semantic + structural query |
+| `pack(q, k, hop, ...)` | Source-grounded snippet packs |
 | `type_hierarchy(node_id)` | **Swift-specific.** Conformers, subclasses, extensions and declared supertypes of one type |
 | `public_api(module_path, limit)` | **Swift-specific.** The declared `public`/`open` surface, read from access levels |
 | `callers(node_id, rel)` | Reverse lookup through any relation, resolving `sym:` stubs |
 | `get_node` / `list_nodes` / `find_node` | Precise lookup |
+| `neighbors(node_id, rels, direction, limit)` | A node's one-hop neighborhood |
 | `centrality` / `bridge_centrality` / `framework_nodes` | Structural rankings |
 | `explain(node_id)` | Natural-language explanation of a node |
 | `find_definition_at(file, line)` | Reverse-resolve a source location |
@@ -108,14 +109,23 @@ priorities, complexity ratings and dependencies instead of dates or durations.
 - No per-file `Last Revision:` headers. Keep `Author:` and `License:`, which
   do not decay; `git log -1 --format=%cd -- <file>` is exact and free.
 
-### MCP instruction sync (required)
+### MCP tool docs (required)
 
-- Any change to MCP tool signatures, parameters, defaults or behaviour in
-  `src/swift_kg/mcp_server.py` must include a matching update to the
-  `mcp = FastMCP(..., instructions=(...))` tool descriptions **in the same
-  commit**.
-- Keep the module docstring "Tools" list and the `FastMCP` instructions block
-  aligned with the runtime tool API. `tests/test_mcp_server.py` asserts this.
+- The server is built on `kg_utils.mcp`. Its instructions are generated: the
+  hand-written `PREAMBLE` in `src/swift_kg/mcp_server.py` followed by one line
+  per tool, taken from each tool's docstring. Nothing lists the tools by hand,
+  so a tool's docstring *is* its documentation: any change to a tool's
+  signature, parameters, defaults or behavior updates its docstring in the
+  same commit.
+- `stats`, `query`, `pack`, `get_node` and `neighbors` are the fleet's
+  canonical tools, the same names on every KG server. `query` and `pack` are
+  SwiftKG's richer versions, registered with `server.canonical(...)`, which
+  refuses any change that drops or retypes a canonical parameter. New tools go
+  in `EXTRA_TOOLS`.
+- `swiftkg mcp --manifest` prints the live tool list as JSON; generate tool
+  references from it rather than writing them by hand.
+  `tests/test_mcp_server.py` checks that `docs/MCP.md` and
+  `skills/swiftkg/SKILL.md` name every tool in it.
 
 ### Fleet parity
 

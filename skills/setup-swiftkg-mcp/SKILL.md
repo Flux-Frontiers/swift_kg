@@ -143,7 +143,7 @@ Run a quick end-to-end test to confirm the full pipeline works before configurin
 
 ## Step 4: Configure MCP Clients
 
-The SwiftKG MCP server is started with `swiftkg mcp --repo <REPO_ROOT>` (transport `stdio` by default; `--transport sse` for HTTP clients). Always use absolute paths.
+The SwiftKG MCP server is started with `swiftkg mcp --repo <REPO_ROOT>` (transport `stdio` by default; `--transport streamable-http` for HTTP clients). `swiftkg mcp --repo <REPO_ROOT> --manifest` prints the tool list without opening the graph. Always use absolute paths.
 
 ### MCP config by agent — quick reference
 
@@ -236,10 +236,13 @@ Present a summary of everything that was done:
 Restart Claude Code / Claude Desktop to activate the swiftkg MCP server.
 
 Available tools once active:
-  • graph_stats()                — codebase size and shape
-  • query_codebase(q)            — semantic + structural exploration
-  • pack_snippets(q)             — source-grounded code snippets
-  • get_node(node_id)            — single node metadata + neighborhood
+  - stats()                      -- codebase size and shape
+  - query(q)                     -- semantic + structural exploration
+  - pack(q)                      -- source-grounded code snippets
+  - get_node(node_id)            -- single node metadata
+  - neighbors(node_id)           -- one-hop neighborhood
+  - type_hierarchy(node_id)      -- conformers, subclasses, extensions of a type
+  - public_api(module_path)      -- declared public/open surface
   • list_nodes(module_path, kind) — enumerate nodes in a module
   • find_node(name, kind)        — locate nodes by name
   • find_definition_at(path, line) — definition at a file:line position
@@ -252,7 +255,7 @@ Available tools once active:
   • snapshot_list / snapshot_show / snapshot_diff — temporal tracking
 
 Suggested first query after restart:
-  graph_stats()
+  stats()
 ```
 
 ---

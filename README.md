@@ -120,7 +120,7 @@ surprising one has to be asked for by name.
 
 ## MCP tools
 
-`swiftkg mcp --repo /path/to/swift-repo` exposes 21 tools. Two exist only in
+`swiftkg mcp --repo /path/to/swift-repo` exposes 22 tools. Two exist only in
 this module:
 
 | Tool | Purpose |
@@ -128,11 +128,13 @@ this module:
 | `type_hierarchy(node_id)` | Conformers, subclasses, extensions and declared supertypes of one type, together — for a Swift type these are one question |
 | `public_api(module_path, limit)` | The declared `public` / `open` surface, read from access levels |
 
-The rest match the fleet: `graph_stats`, `query_codebase`, `pack_snippets`,
-`callers`, `get_node`, `list_nodes`, `find_node`, `centrality`,
+The fleet's canonical five come first, under the same names on every KG
+server: `stats`, `query`, `pack`, `get_node`, `neighbors`. The rest match the
+other code-graph modules: `callers`, `list_nodes`, `find_node`, `centrality`,
 `bridge_centrality`, `framework_nodes`, `find_definition_at`, `analyze_repo`,
 `explain`, `rank_nodes`, `query_ranked`, `explain_rank`, `snapshot_list`,
-`snapshot_show`, `snapshot_diff`.
+`snapshot_show`, `snapshot_diff`. `swiftkg mcp --manifest` prints the live
+list.
 
 See [`docs/MCP.md`](docs/MCP.md) for client configuration.
 

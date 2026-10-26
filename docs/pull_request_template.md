@@ -23,6 +23,6 @@
 
 - [ ] `pre-commit run --all-files` passes
 - [ ] Tests pass, and new behaviour has a test
-- [ ] MCP tool changes update the module docstring **and** the `FastMCP`
-      instructions block in this same commit
+- [ ] MCP tool changes update the tool's docstring (the generated
+      instructions and `--manifest` read it) in this same commit
 - [ ] CHANGELOG updated under Unreleased

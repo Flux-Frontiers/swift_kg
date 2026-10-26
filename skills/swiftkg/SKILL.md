@@ -1,13 +1,13 @@
 ---
 name: swiftkg
-description: Expert knowledge for installing, configuring, and using the SwiftKG MCP server — a hybrid semantic + structural knowledge graph for Swift codebases. Use this skill when the user asks about: setting up SwiftKG in a project, installing swift-kg with pip or Poetry (pip install swift-kg), building the SQLite graph or sqlite-vec vector index, configuring .mcp.json for Claude Code or Kilo Code, configuring .vscode/mcp.json for GitHub Copilot, configuring claude_desktop_config.json for Claude Desktop, using the swiftkg CLI (swiftkg init, swiftkg build, swiftkg query, swiftkg pack, swiftkg analyze, swiftkg centrality, swiftkg bridges, swiftkg framework-nodes, swiftkg explain, swiftkg snapshot, swiftkg install-hooks, swiftkg download-model, swiftkg mcp), using the graph_stats / query_codebase / pack_snippets / callers / get_node / list_nodes / find_node / centrality / bridge_centrality / framework_nodes / find_definition_at / analyze_repo / explain / rank_nodes / query_ranked / explain_rank / snapshot_list / snapshot_show / snapshot_diff MCP tools, or troubleshooting SwiftKG errors.
+description: Expert knowledge for installing, configuring, and using the SwiftKG MCP server — a hybrid semantic + structural knowledge graph for Swift codebases. Use this skill when the user asks about: setting up SwiftKG in a project, installing swift-kg with pip or Poetry (pip install swift-kg), building the SQLite graph or sqlite-vec vector index, configuring .mcp.json for Claude Code or Kilo Code, configuring .vscode/mcp.json for GitHub Copilot, configuring claude_desktop_config.json for Claude Desktop, using the swiftkg CLI (swiftkg init, swiftkg build, swiftkg query, swiftkg pack, swiftkg analyze, swiftkg centrality, swiftkg bridges, swiftkg framework-nodes, swiftkg explain, swiftkg snapshot, swiftkg install-hooks, swiftkg download-model, swiftkg mcp), using the stats / query / pack / get_node / neighbors / callers / type_hierarchy / public_api / list_nodes / find_node / centrality / bridge_centrality / framework_nodes / find_definition_at / analyze_repo / explain / rank_nodes / query_ranked / explain_rank / snapshot_list / snapshot_show / snapshot_diff MCP tools, or troubleshooting SwiftKG errors.
 ---
 
 # SwiftKG Skill
 
 > **Use SwiftKG first — before grep, Glob, or file reads.**
 >
-> Grep and file search find text. SwiftKG understands code. It knows what calls what, which types conform to which protocol, which modules are imported where, and surfaces the most semantically relevant source snippets in a single query. One `pack_snippets` call replaces five rounds of grep-and-read and gives the agent real structural insight into the codebase — not just line matches.
+> Grep and file search find text. SwiftKG understands code. It knows what calls what, which types conform to which protocol, which modules are imported where, and surfaces the most semantically relevant source snippets in a single query. One `pack` call replaces five rounds of grep-and-read and gives the agent real structural insight into the codebase — not just line matches.
 
 SwiftKG (package `swift-kg`, import `swift_kg`) indexes Swift repos into a hybrid knowledge graph (SQLite + sqlite-vec) via tree-sitter AST extraction on the shared kgmodule-utils SDK, and exposes it as MCP tools for AI agents.
 
@@ -103,7 +103,7 @@ Each command is available as `swiftkg <subcommand>` **or** a dedicated `swiftkg-
 | `snapshot prune` | Remove stale snapshots (`--dry-run`) |
 | `install-hooks` / `swiftkg-install-hooks` | Install pre-commit git hook for automatic snapshots |
 | `download-model` / `swiftkg-download-model` | Pre-download embedding model for offline use |
-| `mcp` / `swiftkg-mcp` | Start MCP server (`--repo`, `--db`, `--vectors`, `--transport` stdio/sse) |
+| `mcp` / `swiftkg-mcp` | Start MCP server (`--repo`, `--db`, `--vectors`, `--model`, `--transport` stdio/streamable-http, `--manifest`) |
 
 For detailed options: `swiftkg <command> --help`.
 
@@ -208,10 +208,13 @@ Config path: `~/Library/Application Support/Claude/claude_desktop_config.json` (
 
 | Tool | When to use |
 |---|---|
-| `graph_stats()` | First call — understand codebase size/shape |
-| `query_codebase(q, k, hop, rels, max_nodes, min_score, max_per_module, rerank_mode)` | Explore graph structure, find relevant nodes; tune precision with `min_score`, diversity with `max_per_module` |
-| `pack_snippets(q, k, hop, rels, context, max_lines, ...)` | Read actual source code (prefer over query_codebase) |
-| `get_node(node_id, include_edges)` | Fetch node metadata; `include_edges=True` also returns outgoing edges + incoming callers |
+| `stats()` | First call -- codebase size/shape in the fleet stats shape (`nodes.by_kind`, `edges.by_rel`) |
+| `query(q, k, hop, rels, max_nodes, min_score, max_per_module, rerank_mode)` | Explore graph structure, find relevant nodes; tune precision with `min_score`, diversity with `max_per_module`; `rels` is a list |
+| `pack(q, k, hop, rels, context, max_lines, ...)` | Read actual source code (prefer over `query`) |
+| `get_node(node_id)` | Fetch one node's metadata by stable ID |
+| `neighbors(node_id, rels, direction, limit)` | A node's one-hop neighborhood: its edges and the nodes at their far ends |
+| `type_hierarchy(node_id)` | **Swift-specific.** Conformers, subclasses, extensions and declared supertypes of one type, together |
+| `public_api(module_path, limit)` | **Swift-specific.** The declared `public`/`open` surface, read from access levels |
 | `list_nodes(module_path, kind)` | List nodes filtered by module path prefix and/or kind |
 | `find_node(name, kind)` | Find nodes by plain name or qualname substring |
 | `find_definition_at(path, line)` | Resolve the definition enclosing a file:line position — IDE-style "go to definition" |
@@ -266,13 +269,14 @@ Structure-aware ranking that blends PageRank with semantic search.
 ### Typical session workflow
 
 ```
-1. graph_stats()                                              → orientation
-2. query_codebase("auth middleware", k=8, hop=1)              → find nodes
+1. stats()                                                    -> orientation
+2. query("auth middleware", k=8, hop=1)                       -> find nodes
 3. explain("cls:Sources/Networking/Client.swift:HTTPClient")       → understand before reading
-4. pack_snippets("JWT validation", k=6, hop=1)                → read source
-5. get_node("meth:Sources/Networking/Client.swift:HTTPClient.send", include_edges=True)
-                                                              → node detail + neighborhood in one call
-6. pack_snippets("error handling", k=4, hop=2, rels="CALLS")  → deeper
+4. pack("JWT validation", k=6, hop=1)                         -> read source
+5. get_node("meth:Sources/Networking/Client.swift:HTTPClient.send")
+   neighbors("meth:Sources/Networking/Client.swift:HTTPClient.send")
+                                                              -> node detail, then its neighborhood
+6. pack("error handling", k=4, hop=2, rels=["CALLS"])         -> deeper
 7. snapshot_list() / snapshot_diff("a", "b")                  → track codebase evolution
 ```
 
@@ -301,12 +305,12 @@ If you want snapshot history in git, un-ignore `.swiftkg/snapshots/` — the pre
 
 ## Key Defaults
 
-- `k=8, hop=1`; default rels: `CONTAINS,CALLS,IMPORTS,INHERITS` (add `CONFORMS,EXTENDS` for Swift type structure)
+- `k=8, hop=1`; `query`/`pack` follow all six relations by default (`CONTAINS`, `CALLS`, `IMPORTS`, `INHERITS`, `CONFORMS`, `EXTENDS`)
 - Node kinds: `module`, `class`, `struct`, `enum`, `protocol`, `actor`, `extension`, `function`, `method`, `property`, `typealias`
 - Node ID format: `<prefix>:<module_path>:<qualname>` — e.g. `struct:Sources/Model/Point.swift:Point`, `meth:Sources/Networking/Client.swift:HTTPClient.send`
 - Prefixes: `mod:` file, `cls:` class, `struct:` struct, `enum:` enum, `proto:` protocol, `actor:` actor, `ext:` extension, `fn:` function, `meth:` method, `prop:` property, `type:` typealias, `sym:` unresolved symbol
 - There is no `IMPLEMENTS`: Swift conformance is `CONFORMS`, and `EXTENDS` means an extension, not protocol refinement
-- Transport: `stdio` (Claude Code/Desktop), `sse` (HTTP clients)
+- Transport: `stdio` (Claude Code/Desktop), `streamable-http` (HTTP clients)
 
 ## Troubleshooting
 

@@ -16,6 +16,7 @@ Usage::
 from __future__ import annotations
 
 import click
+from kg_utils.mcp import add_mcp_command
 
 from swift_kg.cli.cmd_analyze import analyze
 from swift_kg.cli.cmd_bridges import bridges
@@ -25,7 +26,7 @@ from swift_kg.cli.cmd_explain import explain
 from swift_kg.cli.cmd_framework_nodes import framework_nodes
 from swift_kg.cli.cmd_hooks import install_hooks
 from swift_kg.cli.cmd_init import init
-from swift_kg.cli.cmd_mcp import mcp_cmd
+from swift_kg.cli.cmd_mcp import build_server
 from swift_kg.cli.cmd_model import download_model
 from swift_kg.cli.cmd_query import pack, query
 from swift_kg.cli.cmd_snapshot import snapshot
@@ -56,4 +57,5 @@ cli.add_command(viz3d)
 cli.add_command(viz_timeline, name="viz-timeline")
 cli.add_command(install_hooks)
 cli.add_command(download_model)
-cli.add_command(mcp_cmd, name="mcp")
+#: The standard ``mcp`` command; registering it does not import ``mcp``.
+mcp_command = add_mcp_command(cli, build_server)

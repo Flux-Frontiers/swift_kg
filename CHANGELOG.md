@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The MCP server is built on the fleet's shared base, `kg_utils.mcp`.**
+  Step 2 of `kgrag_priv/docs/MCP_CENTRALIZATION_PLAN.md`. **Breaking for
+  agents and configs:** four tools take the fleet's canonical names, the
+  same on every KG server, with no aliases: `graph_stats` is `stats`,
+  `query_codebase` is `query`, `pack_snippets` is `pack`, and
+  `get_node(include_edges=True)` is `get_node` followed by the new
+  `neighbors(node_id, rels, direction, limit)`. The server now has 22
+  tools: the five canonical ones first, then SwiftKG's 17 (including
+  `type_hierarchy` and `public_api`), unchanged apart from how they reach
+  the graph.
+- **`query` and `pack` keep SwiftKG's richer search:** hybrid reranking by
+  default, the per-module cap, the rerank weights, and all six Swift
+  relations (including `CONFORMS` and `EXTENDS`) followed when `rels` is
+  omitted. Two changes: `rels` takes a list (`["CALLS"]`) instead of a
+  comma-separated string, and `query` returns structured JSON only, so its
+  `format="markdown"` option is gone. `stats` and `get_node` return JSON
+  rather than Markdown, with the same content.
+- **`stats` returns the fleet's stats shape**, from kgmodule-utils 0.29.0's
+  `KGModule.stats()`: `{"kind": "code", "nodes": {"total", "by_kind"},
+  "edges": {"total", "by_rel"}}` plus SwiftKG's own measures
+  (`meaningful_nodes`, `docstring_coverage`, the vector backend) as extras.
+  The flat `total_nodes` / `node_counts` keys are gone from
+  `SwiftKG.stats()`; the store's `stats()` and snapshots keep them, and the
+  thorough analysis flattens the shape for its report. The snapshot
+  freshness check reads `nodes.total`.
+- **`swiftkg mcp` is the fleet's standard command:** `--repo`, `--db`,
+  `--vectors`, `--model`, `--transport stdio|streamable-http`, `--host`,
+  `--port`, and `--manifest`, which prints the tool list as JSON without
+  opening the graph. `--transport sse` is gone; it is deprecated in the MCP
+  specification. `swiftkg-mcp` is kept for Claude Desktop and Copilot
+  configs and is now the same command. Registering it does not import
+  `mcp`, so other `swiftkg` commands start as before.
+- **The server opens the graph per session and closes it after**, instead
+  of holding a module-level instance, and refuses a repository with no
+  graph instead of serving it empty. Under stdio, stray output from a tool
+  goes to stderr and can no longer corrupt the protocol stream.
+- **The instructions are generated** from a short hand-written preamble
+  (workflows and argument bounds) and each tool's docstring, so they cannot
+  drift from the tools. CLAUDE.md's instruction-sync rule, the
+  `sync-mcp-docs` skill and the PR template now say so.
+- `SwiftKG.neighbors()` normalizes a backticked or quoted node ID, as
+  `node()` and `callers()` already did.
+- The docs, skills, `.mcp.json.example` and `explain`'s closing hint use
+  the new names.
+
+### Fixed
+
+- **`analyze_repo` failed on every call.** It imported its stats-only
+  fallback renderer as `_render_analysis`, a name `swift_kg.kg` never
+  defined, before running the analysis. It now imports `render_analysis`.
+- **`list_nodes` and `find_node` no longer fail as a session's first
+  call.** They read the lazy `_store` attribute, which is `None` until the
+  store is first opened, and answered "No database store available."
+
+**Needs `kgmodule-utils` 0.29.0**, unreleased: this branch is developed
+against its local wheel, and the floor and lock move when it ships.
+
 ## [0.4.0] - 2026-09-29
 
 ### Removed
