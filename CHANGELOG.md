@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`prune_ambiguous_resolutions()`**, the post-build pass that deleted the
+  `name_fallback_ambiguous` edges `GraphStore.resolve_symbols()` wrote, one
+  per candidate, when a bare name matched several definitions. Since
+  kgmodule-utils 0.29.1 the store leaves such a name unresolved and writes
+  none, so the prune deleted nothing. `resolve_symbols_pruned()` still runs
+  the stdlib-member and extension-self prunes.
+
+### Changed
+
+- **`kgmodule-utils` floor raised to `>=0.29.1`.** Without it an older SDK
+  would write the ambiguous edges again with nothing to remove them;
+  `test_ambiguous_bare_name_stays_unresolved` fails against 0.29.0.
+
 ## [0.5.0] - 2026-10-26
 
 ### Changed

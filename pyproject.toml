@@ -85,7 +85,9 @@ dependencies = [
     # from the base class, whose shared validators 0.25.0 hardened (item 52).
     # 0.29.0: the MCP server is kg_utils.mcp's ([mcp] brings mcp itself),
     # stats() is the fleet stats shape, and LanceDB is gone.
-    "kgmodule-utils[semantic,sqlite-vec,mcp]>=0.29.0",
+    # 0.29.1: resolve_symbols() leaves ambiguous names unresolved, which
+    # replaced this repo's prune_ambiguous_resolutions().
+    "kgmodule-utils[semantic,sqlite-vec,mcp]>=0.29.1",
     "click>=8.1.0,<9",
     "networkx>=3.0",
 ]

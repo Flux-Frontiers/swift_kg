@@ -2,29 +2,24 @@
 resolution.py — post-resolution hygiene for the Swift symbol graph.
 
 ``GraphStore.resolve_symbols`` matches ``sym:`` stubs to first-party
-definitions by name, and when a bare name matches several definitions it
-writes a RESOLVES_TO edge to *every* one of them.  That is survivable in
-Python.  It is not survivable in Swift, where member names are short and
-routinely overloaded across unrelated types: in Alamofire ``sym:init`` matches
-96 definitions, ``sym:request`` 30 and ``sym:encode`` 19.  Everything derived
+definitions by name.  Swift member names are short and routinely overloaded
+across unrelated types: in Alamofire ``sym:init`` matches 96 definitions,
+``sym:request`` 30 and ``sym:encode`` 19.  Since kgmodule-utils 0.29.1 the
+store leaves a name that matches several definitions unresolved, which is
+what Swift needs: a statically typed reference with no receiver type and
+several candidates is unresolvable, not a weak signal.  Everything derived
 from resolved edges -- ``callers()`` fan-in, CodeRank, the SIR ranker, which
-all fan out through RESOLVES_TO -- would rank on those guesses.
+all fan out through RESOLVES_TO -- would otherwise rank on guesses.
 
-Three prunes run after resolution, all from :func:`resolve_symbols_pruned`:
+A unique name match can still be wrong, so two prunes run after resolution,
+both from :func:`resolve_symbols_pruned`:
 
-:func:`prune_ambiguous_resolutions` drops every resolution the store itself
-marked ambiguous.  Swift is statically typed, so a name matching several
-declarations with no receiver type is not a weak signal to be kept at low
-confidence -- it is an unresolvable reference, and resolving it every possible
-way is worse than leaving it alone.  This is the deliberate divergence from
-PyCodeKG, which keeps ambiguous matches.
-
-:func:`prune_stdlib_member_resolutions` covers the second population: a stub
+:func:`prune_stdlib_member_resolutions` covers the first: a stub
 like ``sym:append`` is almost always ``Array.append``, not the repository's own
 ``MultipartFormData.append``, and no amount of name matching can tell them
 apart.  The direct analogue of PyCodeKG's builtin-method prune.
 
-:func:`prune_extension_self_resolutions` covers a third: ``extension Array``
+:func:`prune_extension_self_resolutions` covers the second: ``extension Array``
 emits an EXTENDS edge to ``sym:Array``, and the only node in the graph named
 ``Array`` is that same extension.  Resolving it links the extension to itself.
 
@@ -97,23 +92,6 @@ SWIFT_STDLIB_MEMBER_NAMES = frozenset(
 )
 
 
-def prune_ambiguous_resolutions(con: sqlite3.Connection) -> int:
-    """Delete RESOLVES_TO edges the store marked as ambiguous name matches.
-
-    ``resolve_symbols`` tags these ``name_fallback_ambiguous`` and writes one
-    edge per candidate, so a single overloaded name can contribute dozens.
-
-    :param con: Open SQLite connection with an ``edges`` table.
-    :return: Number of RESOLVES_TO edges deleted.
-    """
-    cur = con.execute(
-        "DELETE FROM edges WHERE rel = 'RESOLVES_TO'"
-        " AND json_extract(evidence, '$.resolution_mode') = 'name_fallback_ambiguous'"
-    )
-    con.commit()
-    return cur.rowcount
-
-
 def prune_stdlib_member_resolutions(con: sqlite3.Connection) -> int:
     """Delete RESOLVES_TO edges for stubs named after a stdlib member.
 
@@ -170,7 +148,6 @@ def resolve_symbols_pruned(store) -> int:
     :return: Net number of RESOLVES_TO edges kept.
     """
     resolved = store.resolve_symbols()
-    pruned = prune_ambiguous_resolutions(store.con)
-    pruned += prune_stdlib_member_resolutions(store.con)
+    pruned = prune_stdlib_member_resolutions(store.con)
     pruned += prune_extension_self_resolutions(store.con)
     return max(0, resolved - pruned)

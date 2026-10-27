@@ -4,8 +4,9 @@ test_resolution.py — symbol stubs and the prunes applied after resolution.
 The extractor's two-pass resolver pins down every reference it can and refuses
 to guess between candidates, so what reaches resolution is what it could not
 resolve: framework names with no first-party declaration, and calls through a
-receiver of unknown type.  Resolving those by bare name is only safe once the
-ambiguous matches are dropped, which is what most of this file is about.
+receiver of unknown type.  Resolving those by bare name is only safe if
+ambiguous matches stay unresolved and the remaining collisions are pruned,
+which is what most of this file is about.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from swift_kg.extractor import _HAS_TREE_SITTER
 from swift_kg.kg import SwiftKG
 from swift_kg.resolution import (
     SWIFT_STDLIB_MEMBER_NAMES,
-    prune_ambiguous_resolutions,
     prune_extension_self_resolutions,
     prune_stdlib_member_resolutions,
     resolve_symbols_pruned,
@@ -46,7 +46,6 @@ CREATE TABLE edges (
 );
 """
 
-AMBIGUOUS = '{"resolution_mode": "name_fallback_ambiguous", "confidence": "low"}'
 UNIQUE = '{"resolution_mode": "name_fallback", "confidence": "medium"}'
 
 
@@ -73,18 +72,6 @@ def _add_edge(con: sqlite3.Connection, src: str, rel: str, dst: str, evidence: s
         "INSERT INTO edges (src, rel, dst, evidence) VALUES (?, ?, ?, ?)",
         (src, rel, dst, evidence or None),
     )
-
-
-def test_prune_ambiguous_drops_only_ambiguous_resolutions() -> None:
-    con = _con()
-    _add_edge(con, "sym:cancel", "RESOLVES_TO", "m:a.swift:A.cancel", AMBIGUOUS)
-    _add_edge(con, "sym:cancel", "RESOLVES_TO", "m:b.swift:B.cancel", AMBIGUOUS)
-    _add_edge(con, "sym:recordEntry", "RESOLVES_TO", "m:c.swift:Ledger.recordEntry", UNIQUE)
-    con.commit()
-
-    assert prune_ambiguous_resolutions(con) == 2
-    survivors = [r[0] for r in con.execute("SELECT src FROM edges WHERE rel = 'RESOLVES_TO'")]
-    assert survivors == ["sym:recordEntry"]
 
 
 def test_prune_stdlib_members_drops_resolutions_for_library_names() -> None:
