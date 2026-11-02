@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-02
+
 ### Removed
 
 - **`prune_ambiguous_resolutions()`**, the post-build pass that deleted the
@@ -21,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`kgmodule-utils` floor raised to `>=0.29.1`.** Without it an older SDK
   would write the ambiguous edges again with nothing to remove them;
   `test_ambiguous_bare_name_stays_unresolved` fails against 0.29.0.
+
+### Security
+
+- **Lock refresh** (#15): certifi 2026.10.23, filelock 4.2.7, setuptools
+  84.2.1 and virtualenv 21.15.2, past the advisories open against the rest
+  of the fleet. swift_kg declares no Pillow.
 
 ## [0.5.0] - 2026-10-26
 
