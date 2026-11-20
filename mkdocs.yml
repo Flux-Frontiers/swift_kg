@@ -1,8 +1,7 @@
 # mkdocs-material site config -- see .github/workflows/docs.yml for the build.
 #
-# Deliberately no theme.logo / theme.favicon: this repo ships no brand assets,
-# and naming files that do not exist gives the built site two silent 404s.
-# Add both to docs/assets/ and the two keys together, not one without the other.
+# theme.logo and theme.favicon point at docs/assets/, which
+# scripts/build_logo.py writes; keep the files and the two keys together.
 site_name: SwiftKG
 site_description: Knowledge graph for Swift codebases -- deterministic tree-sitter AST extraction, hybrid semantic + structural search, served over MCP.
 site_url: https://flux-frontiers.github.io/swift_kg/
@@ -12,6 +11,8 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  logo: assets/logo.png
+  favicon: assets/favicon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

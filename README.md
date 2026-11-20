@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Flux-Frontiers/swift_kg/main/assets/swiftkg_banner.png" alt="SwiftKG" width="720"/>
+</p>
+
 # SwiftKG
 
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
