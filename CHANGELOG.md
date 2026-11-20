@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An Art Techno logo.** The closure: two braces, `{ }`, drawn as gold traces
+  around a die, with the tagline SWIFT AS A GRAPH. `scripts/build_logo.py`
+  draws the mark, a 64 px icon and a banner as SVG under `assets/` and writes
+  the PNGs. The README shows the banner at the top, by absolute raw URL so
+  PyPI shows it too, and the docs site shows the icon as its header logo and
+  favicon (`docs/assets/`, set in `mkdocs.yml`).
+
 ## [0.5.1] - 2026-11-02
 
 ### Removed
